@@ -1,0 +1,18 @@
+fastapi>=0.110.0
+uvicorn>=0.28.0
+pydantic>=2.6.0
+pydantic-settings>=2.2.0
+sqlalchemy>=2.0.0
+aiosqlite>=0.20.0
+pandas>=2.2.0
+numpy>=1.26.0
+scikit-learn>=1.4.0
+xgboost>=2.0.0
+lightgbm>=4.3.0
+torch>=2.2.0
+websockets>=12.0
+pytest>=8.0.0
+python-dotenv>=1.0.0
+# MetaTrader5 REQUIRES 64-bit Python on Windows — install separately if needed:
+# pip install MetaTrader5
+MetaTrader5>=5.0.45

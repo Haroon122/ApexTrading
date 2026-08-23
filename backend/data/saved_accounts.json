@@ -1,0 +1,30 @@
+{
+  "10011810265@MetaQuotes-Demo": {
+    "id": "10011810265@MetaQuotes-Demo",
+    "name": "Haroon Hafeez",
+    "login": 10011810265,
+    "password": "alM9Z25sI8g=",
+    "server": "MetaQuotes-Demo",
+    "broker": "MetaQuotes Ltd.",
+    "account_type": "Demo",
+    "currency": "USD",
+    "leverage": "1:100",
+    "terminal_path": "C:\\Program Files\\MetaTrader 5\\terminal64.exe",
+    "last_connected": "2026-08-19T00:11:51.605601",
+    "is_active": true
+  },
+  "110690124@MetaQuotes-Demo": {
+    "id": "110690124@MetaQuotes-Demo",
+    "name": "Muhammad Haroon Haroon",
+    "login": 110690124,
+    "password": "F1guOWU0IdQ=",
+    "server": "MetaQuotes-Demo",
+    "broker": "MetaQuotes Ltd.",
+    "account_type": "Demo",
+    "currency": "GBP",
+    "leverage": "1:100",
+    "terminal_path": "C:\\Program Files\\MetaTrader 5\\terminal64.exe",
+    "last_connected": "2026-08-19T19:32:25.949823",
+    "is_active": true
+  }
+}
