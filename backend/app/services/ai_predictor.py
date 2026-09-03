@@ -107,9 +107,15 @@ class AIPredictor:
                 
             self.active_model_version = version
             
-            # Save active version in SQLite
+            # Save active version in SQLite and Risk Settings
             from app.services.trade_learner import trade_learner
             trade_learner.set_metadata("active_model_version", version)
+
+            try:
+                from app.services.trade_manager import trade_manager
+                trade_manager.update_risk_settings({"active_model_version": version})
+            except Exception as e:
+                logger.warning(f"[AI PREDICTOR] Could not update risk_settings active_model_version: {e}")
             
             logger.info(f"[AI PREDICTOR] Successfully activated model version: {version} ({model_type})")
             return True

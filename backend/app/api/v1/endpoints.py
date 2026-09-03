@@ -215,6 +215,10 @@ def get_bot_status() -> Dict[str, Any]:
     status_data = trade_manager.get_status()
     status_data["engine_state"] = trading_worker.state.value if hasattr(trading_worker, 'state') else "STOPPED"
     status_data["engine_reason"] = trading_worker.status_reason if hasattr(trading_worker, 'status_reason') else ""
+    live_reason = ""
+    if hasattr(trading_worker, "last_payload") and isinstance(trading_worker.last_payload, dict):
+        live_reason = trading_worker.last_payload.get("auto_trade_live_reason", "")
+    status_data["auto_trade_live_reason"] = live_reason
     return status_data
 
 
@@ -223,6 +227,9 @@ async def start_bot(
     symbol: str = Query(default=settings.DEFAULT_SYMBOL),
     timeframe: str = Query(default="M15")
 ) -> Dict[str, Any]:
+    if timeframe:
+        trade_manager.update_risk_settings({"entry_timeframe": timeframe})
+
     if trading_worker.is_running():
         return {
             "success": True,
@@ -234,6 +241,8 @@ async def start_bot(
         worker_ok, worker_msg = await trading_worker.start(symbol, timeframe)
         if not worker_ok:
             logger.warning(f"[BOT START] Centralized worker failed to start: {worker_msg}")
+            trade_manager.pause_bot() # Revert status
+            return {"success": False, "message": f"Worker start failed: {worker_msg}", "status": trade_manager.bot_status.value}
     return {"success": success, "message": msg, "status": trade_manager.bot_status.value}
 
 
@@ -327,41 +336,20 @@ def execute_ai_trade(
     symbol: str = Query(default=settings.DEFAULT_SYMBOL),
     timeframe: str = Query(default="M15")
 ) -> Dict[str, Any]:
-    candles = mt5_adapter.fetch_candles(symbol, timeframe, 200)
-    ticker = mt5_adapter.get_ticker(symbol)
-    account = mt5_adapter.get_account_info()
-
-    report = decision_engine.evaluate_trade_opportunity(symbol, candles, ticker, timeframe)
+    res = trade_manager.evaluate_and_execute_pipeline(symbol, timeframe, force_execution=True)
     
-    if report.decision.value == "HOLD":
-        rejection_str = f"Rejection reasons: {', '.join(report.rejection_reasons)}" if report.rejection_reasons else ""
-        return {
-            "success": False,
-            "message": f"No trade executed. Strategy decision is HOLD. {rejection_str}",
-            "report": report.model_dump()
-        }
-
-    risk_check = risk_manager.evaluate_risk(account, report, symbol)
-    if not risk_check.passed:
-        return {
-            "success": False,
-            "message": "Risk Management Rejected Order",
-            "risk_reasons": risk_check.reasons,
-            "report": report.model_dump()
-        }
-
-    # Pass force_execution=True because user explicitly clicked "Execute AI Signal"
-    success, trade, msg = trade_manager.execute_decision(report, risk_check.calculated_lots, force_execution=True)
-
     fresh_account = mt5_adapter.get_account_info()
     fresh_positions = mt5_adapter.get_positions()
     fresh_pending = mt5_adapter.get_pending_orders()
 
+    report_obj = res.get("report")
+
     return {
-        "success": success,
-        "message": msg,
-        "trade": trade.model_dump() if trade else None,
-        "report": report.model_dump(),
+        "success": res["success"],
+        "message": res["message"],
+        "trade": res.get("trade").model_dump() if res.get("trade") else None,
+        "report": report_obj.model_dump() if report_obj else None,
+        "risk_reasons": res.get("risk_reasons", []),
         "account": fresh_account.model_dump(),
         "positions": [p.model_dump() for p in fresh_positions],
         "pending_orders": [p.model_dump() for p in fresh_pending]
@@ -618,7 +606,11 @@ def get_ml_models() -> List[Dict[str, Any]]:
     """
     List all available machine learning models in the models directory.
     """
-    return ai_predictor.list_available_models()
+    models = ai_predictor.list_available_models()
+    active_ver = ai_predictor.active_model_version
+    for m in models:
+        m["is_active"] = (m["version"] == active_ver)
+    return models
 
 
 @router.post("/ml/models/activate", dependencies=[Depends(verify_api_key)])
@@ -648,12 +640,12 @@ def _run_training_task(version: str):
 @router.post("/ml/train", dependencies=[Depends(verify_api_key)])
 def trigger_ml_training(
     background_tasks: BackgroundTasks,
-    version: str = Query(default=None)
+    version: Optional[str] = Query(default=None)
 ) -> Dict[str, Any]:
     """
     Triggers chronological walk-forward validation and training of a new model version.
     """
-    if trade_manager.training_active:
+    if getattr(trade_manager, "training_active", False):
         raise HTTPException(status_code=400, detail="Training is already in progress.")
         
     if not version:

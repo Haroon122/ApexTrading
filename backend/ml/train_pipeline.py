@@ -131,7 +131,8 @@ class MLTrainingPipeline:
         for tf in timeframes:
             count = min(15000, tf_candle_counts[tf])
             candles = mt5_adapter.fetch_candles(self.symbol, tf, count)
-            if not candles or len(candles) < 100:
+            min_req = 30 if tf in ("H1", "H4") else 80
+            if not candles or len(candles) < min_req:
                 logger.error(f"[ML PIPELINE] Insufficient data returned for timeframe {tf}. Found {len(candles) if candles else 0}")
                 raise ValueError(f"Insufficient historical data for {tf} timeframe")
                 
@@ -172,15 +173,25 @@ class MLTrainingPipeline:
         """
         logger.info("[ML PIPELINE] Aligning multi-timeframe features causally...")
         df_m1 = dfs["M1"].copy()
-        
+        if "timestamp" in df_m1.columns:
+            df_m1.set_index("timestamp", inplace=True)
+            
         # Prepare HTF trend fields
         df_m1["M5_Trend"] = 0.0
         df_m1["M15_Trend"] = 0.0
         df_m1["H1_Trend"] = 0.0
         
-        df_m5 = dfs["M5"]
-        df_m15 = dfs["M15"]
-        df_h1 = dfs["H1"]
+        df_m5 = dfs["M5"].copy()
+        if "timestamp" in df_m5.columns:
+            df_m5.set_index("timestamp", inplace=True)
+            
+        df_m15 = dfs["M15"].copy()
+        if "timestamp" in df_m15.columns:
+            df_m15.set_index("timestamp", inplace=True)
+            
+        df_h1 = dfs["H1"].copy()
+        if "timestamp" in df_h1.columns:
+            df_h1.set_index("timestamp", inplace=True)
         
         # Precompute trends on HTF dfs
         # Trend is 1.0 if close > EMA20, else -1.0
@@ -241,15 +252,15 @@ class MLTrainingPipeline:
         atrs = df_m1["atr_14"].values
         
         # Feature builder
-        rsi = df_m1["rsi_14"].values / 100.0
-        stoch_k = df_m1["stoch_k"].values / 100.0
-        macd = df_m1["macd_hist"].values * 100.0
-        adx = df_m1["adx"].values / 100.0
-        rvol = df_m1["rvol"].values / 3.0
-        ema20 = df_m1["ema_20"].values
-        ema50 = df_m1["ema_50"].values
-        ema200 = df_m1["ema_200"].values
-        vwap = df_m1["vwap"].values
+        rsi = (df_m1["rsi_14"].values if "rsi_14" in df_m1.columns else np.full(n_samples, 50.0)) / 100.0
+        stoch_k = (df_m1["stoch_rsi_k"].values if "stoch_rsi_k" in df_m1.columns else (df_m1["stoch_k"].values if "stoch_k" in df_m1.columns else np.full(n_samples, 50.0))) / 100.0
+        macd = (df_m1["macd_hist"].values if "macd_hist" in df_m1.columns else np.zeros(n_samples)) * 100.0
+        adx = (df_m1["adx"].values if "adx" in df_m1.columns else np.full(n_samples, 20.0)) / 100.0
+        rvol = (df_m1["rvol"].values if "rvol" in df_m1.columns else np.full(n_samples, 1.0)) / 3.0
+        ema20 = df_m1["ema_20"].values if "ema_20" in df_m1.columns else closes
+        ema50 = df_m1["ema_50"].values if "ema_50" in df_m1.columns else closes
+        ema200 = df_m1["ema_200"].values if "ema_200" in df_m1.columns else closes
+        vwap = df_m1["vwap"].values if "vwap" in df_m1.columns else closes
         
         m5_trend = df_m1["M5_Trend"].values
         m15_trend = df_m1["M15_Trend"].values

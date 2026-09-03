@@ -38,6 +38,8 @@ class TradeManager:
         self.last_trade_date: Optional[date] = None
         self.risk_settings: RiskSettings = self._load_persisted_risk_settings()
         self.executed_signals: Dict[str, datetime] = {}
+        self.training_active: bool = False
+        self.backtest_active: bool = False
         self._load_recent_signals()
 
     def _load_recent_signals(self):
@@ -85,14 +87,19 @@ class TradeManager:
             daily_loss_limit_pct=settings.DAILY_LOSS_LIMIT_PCT,
             weekly_loss_limit_pct=settings.WEEKLY_LOSS_LIMIT_PCT,
             max_open_positions=settings.MAX_OPEN_POSITIONS,
-            lot_sizing_mode="FIXED",
-            user_configured_lot=0.10,
-            max_allowed_lot=1.00,
-            default_lot_size=0.1,
+            entry_timeframe="M1",
+            entry_confirmation_mode="IMMEDIATE",
+            lot_sizing_mode="DYNAMIC_RISK",
+            user_configured_lot=0.01,
+            max_allowed_lot=0.05,
+            default_lot_size=0.01,
             trailing_stop_pips=15.0,
-            trailing_activation_rr=1.2,
+            trailing_activation_rr=0.6,
             trailing_atr_multiplier=2.0,
             break_even_rr=settings.BREAK_EVEN_AT_RR,
+            giveback_guard_enabled=True,
+            giveback_guard_min_rr=0.2,
+            giveback_guard_retrace_pct=30.0,
             min_ai_confidence=settings.MIN_AI_CONFIDENCE,
             auto_trade_enabled=False,
             auto_trade_cooldown_seconds=300,
@@ -136,8 +143,32 @@ class TradeManager:
             self.daily_trade_count = 0
             self.last_trade_date = today
 
+        # Check Daily/Weekly Loss Circuit Breaker locks
+        try:
+            account = mt5_adapter.get_account_info()
+            if account and account.balance > 0:
+                daily_loss_pct = float(getattr(self.risk_settings, "daily_loss_limit_pct", settings.DAILY_LOSS_LIMIT_PCT))
+                if account.daily_pnl_usd <= -(account.balance * (daily_loss_pct / 100.0)):
+                    res, msg = False, f"Daily Loss Circuit Breaker has been triggered (Loss ${abs(account.daily_pnl_usd):.2f} >= {daily_loss_pct}% limit). New trades are currently disabled."
+                    logger.info(f"[CAN AUTO TRADE] Result: {res}, Reason: {msg}")
+                    return res, msg
+
+                max_daily_loss_amt = float(getattr(self.risk_settings, "max_daily_loss_amount", 500.0) or 0.0)
+                if max_daily_loss_amt > 0.0 and account.daily_pnl_usd <= -max_daily_loss_amt:
+                    res, msg = False, f"Daily Loss Circuit Breaker has been triggered (Loss ${abs(account.daily_pnl_usd):.2f} >= ${max_daily_loss_amt:.2f} limit). New trades are currently disabled."
+                    logger.info(f"[CAN AUTO TRADE] Result: {res}, Reason: {msg}")
+                    return res, msg
+
+                weekly_loss_pct = float(getattr(self.risk_settings, "weekly_loss_limit_pct", settings.WEEKLY_LOSS_LIMIT_PCT))
+                if account.weekly_pnl_usd <= -(account.balance * (weekly_loss_pct / 100.0)):
+                    res, msg = False, f"Weekly Loss Circuit Breaker has been triggered (Loss ${abs(account.weekly_pnl_usd):.2f} >= {weekly_loss_pct}% limit). New trades are currently disabled."
+                    logger.info(f"[CAN AUTO TRADE] Result: {res}, Reason: {msg}")
+                    return res, msg
+        except Exception as e:
+            logger.warning(f"[CAN AUTO TRADE] Account check error: {e}")
+
         if self.daily_trade_count >= self.risk_settings.max_trades_per_day:
-            res, msg = False, f"Daily trade limit reached ({self.daily_trade_count}/{self.risk_settings.max_trades_per_day})."
+            res, msg = False, f"Daily trade limit reached ({self.daily_trade_count}/{self.risk_settings.max_trades_per_day}). New trades are currently disabled."
             logger.info(f"[CAN AUTO TRADE] Result: {res}, Reason: {msg}")
             return res, msg
 
@@ -244,7 +275,133 @@ class TradeManager:
         except Exception as e:
             return False, f"Execution blocked: Safety check failed with error: {str(e)}"
 
-    # ── ORDER EXECUTION ────────────────────────────────────────────
+    # ── SINGLE AUTHORITATIVE AI EXECUTION PIPELINE ──────────────────
+
+    def evaluate_and_execute_pipeline(
+        self,
+        symbol: str,
+        timeframe: str = "M15",
+        force_execution: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Single Authoritative AI Execution Pipeline.
+        Executes pre-flight, strategy decision, risk evaluation, and broker order placement.
+        Used identically by manual 'Execute AI Signal' and background Auto Trading worker.
+        """
+        from app.adapters.mt5_adapter import mt5_adapter
+        from app.services.decision_engine import decision_engine
+        from app.services.risk_manager import risk_manager
+
+        account = mt5_adapter.get_account_info()
+        
+        # 1. Pre-flight & MT5 Connection / Permissions Check
+        if mt5_adapter.session_manager.use_live_mt5:
+            if not account or not account.is_connected:
+                err = "MT5 Account is not connected. Please connect via MT5 Connection Manager."
+                return {
+                    "success": False,
+                    "stage": "PRE_FLIGHT",
+                    "reason": f"Trade Blocked [Connection]: {err}",
+                    "message": err
+                }
+            
+            import MetaTrader5 as mt5
+            from app.services.session_manager import MT5_AVAILABLE
+            if MT5_AVAILABLE:
+                t_info = mt5.terminal_info()
+                if t_info is not None and not t_info.trade_allowed:
+                    err = "Algo Trading is DISABLED in MT5 terminal. Please click 'Algo Trading' (Ctrl+E) in MT5 toolbar to allow automated orders."
+                    return {
+                        "success": False,
+                        "stage": "PERMISSIONS",
+                        "reason": f"AI Execution Blocked: {err}",
+                        "message": err
+                    }
+
+        # 2. Check Auto Trade Permissions if not forced
+        if not force_execution:
+            can_trade, can_msg = self.can_auto_trade()
+            if not can_trade:
+                return {
+                    "success": False,
+                    "stage": "AUTO_TRADE_PERMISSIONS",
+                    "reason": f"Trade Blocked: {can_msg}",
+                    "message": f"Trade Blocked: {can_msg}"
+                }
+
+        # 3. Strategy Decision Engine Evaluation
+        candles = mt5_adapter.fetch_candles(symbol, timeframe, 200)
+        ticker = mt5_adapter.get_ticker(symbol)
+        
+        m1_candles = mt5_adapter.fetch_candles(symbol, "M1", 100)
+        m5_candles = mt5_adapter.fetch_candles(symbol, "M5", 100)
+        m15_candles = mt5_adapter.fetch_candles(symbol, "M15", 100)
+        h1_candles = mt5_adapter.fetch_candles(symbol, "H1", 100)
+        h4_candles = mt5_adapter.fetch_candles(symbol, "H4", 100)
+        htf_candles = {"M1": m1_candles, "M5": m5_candles, "M15": m15_candles, "H1": h1_candles, "H4": h4_candles}
+
+        report = decision_engine.evaluate_trade_opportunity(symbol, candles, ticker, timeframe, htf_candles=htf_candles)
+        
+        if report.decision.value == "HOLD":
+            rej_list = report.rejection_reasons or []
+            primary_code = rej_list[0] if rej_list else "HOLD"
+            clean_detail = rej_list[1] if len(rej_list) > 1 else (rej_list[0] if rej_list else "Strategy decision is HOLD")
+            
+            if primary_code == "SPREAD_BLOCKED":
+                live_reason = f"Trade Blocked [High Spread]: {clean_detail}"
+            elif primary_code == "NEWS_BLOCKED":
+                live_reason = f"Trade Blocked [News Blackout]: {clean_detail}"
+            elif primary_code == "HTF_ALIGNMENT_BLOCKED":
+                live_reason = f"Trade Blocked [Market Structure]: {clean_detail}"
+            elif primary_code == "RR_BLOCKED":
+                live_reason = f"Trade Blocked [Risk/Reward]: {clean_detail}"
+            elif primary_code == "LOW_CONFIDENCE":
+                live_reason = f"Trade Held [Low Confidence]: {clean_detail}"
+            else:
+                live_reason = f"Trade Held: {clean_detail}"
+
+            reason_msg = f"No trade executed. Strategy decision is HOLD. {clean_detail}"
+            return {
+                "success": False,
+                "stage": "STRATEGY_HOLD",
+                "reason": live_reason,
+                "message": reason_msg,
+                "report": report
+            }
+
+        # 4. Institutional Risk Evaluation
+        risk_check = risk_manager.evaluate_risk(account, report, symbol)
+        if not risk_check.passed:
+            first_risk = risk_check.reasons[0] if risk_check.reasons else "Risk Management Rejected Order"
+            return {
+                "success": False,
+                "stage": "RISK_REJECTED",
+                "reason": f"Trade Blocked by Risk Guard: {first_risk}",
+                "message": f"Risk Management Rejected Order: {first_risk}",
+                "risk_reasons": risk_check.reasons,
+                "report": report
+            }
+
+        # 5. Broker / Adapter Trade Execution
+        success, trade, exec_msg = self.execute_decision(report, risk_check.calculated_lots, force_execution=force_execution)
+        
+        if not success:
+            return {
+                "success": False,
+                "stage": "EXECUTION_FAILED",
+                "reason": f"AI Execution Blocked: {exec_msg}",
+                "message": exec_msg,
+                "report": report
+            }
+
+        return {
+            "success": True,
+            "stage": "EXECUTED",
+            "reason": f"Trade Executed Successfully: {exec_msg}",
+            "message": exec_msg,
+            "trade": trade,
+            "report": report
+        }
 
     def execute_decision(self, report: TradeDecisionReport, lots: float, force_execution: bool = False) -> Tuple[bool, Optional[TradeRecord], str]:
         logger.info(f"[EXECUTE DECISION] execute_decision reached: symbol={report.symbol}, decision={report.decision.value}, lots={lots}, force_execution={force_execution}")
@@ -613,8 +770,12 @@ class TradeManager:
 
             profit_rr = profit_pips / (sl_distance_pips if sl_distance_pips > 0 else 20.0)
 
+            # ── PEAK PROFIT RR TRACKING (no look-ahead — uses only current price) ──
+            if profit_rr > trade.peak_profit_rr:
+                trade.peak_profit_rr = profit_rr
+
             # Read dynamic trailing settings
-            activation_rr = float(getattr(self.risk_settings, "trailing_activation_rr", 1.2))
+            activation_rr = float(getattr(self.risk_settings, "trailing_activation_rr", 0.6))
             atr_mult = float(getattr(self.risk_settings, "trailing_atr_multiplier", 2.0))
 
             # Fetch M1 ATR for dynamic trailing distance
@@ -631,6 +792,34 @@ class TradeManager:
             # Dynamic trailing distance in pips ($3.50 / 35 pips minimum cushion on Gold)
             dynamic_trail_pips = max(self.risk_settings.trailing_stop_pips, (atr_m1_price * atr_mult) / (pip_size or 0.10))
 
+            # ── GIVEBACK GUARD ─────────────────────────────────────────────────────
+            # Fires only BEFORE trailing activation to avoid conflicting with the trailing stop.
+            # Closes the position at market if the trade retraces more than giveback_retrace_pct
+            # of its peak unrealized R-multiple, provided peak has reached giveback_min_rr.
+            giveback_enabled = getattr(self.risk_settings, "giveback_guard_enabled", True)
+            giveback_min_rr = float(getattr(self.risk_settings, "giveback_guard_min_rr", 0.3))
+            giveback_retrace = float(getattr(self.risk_settings, "giveback_guard_retrace_pct", 50.0)) / 100.0
+
+            if (
+                giveback_enabled
+                and profit_rr < activation_rr                              # trailing not yet active
+                and trade.peak_profit_rr >= giveback_min_rr                # reached minimum profit threshold
+                and profit_rr < trade.peak_profit_rr * (1.0 - giveback_retrace)  # retraced beyond guard level
+            ):
+                logger.info(
+                    f"[GIVEBACK GUARD] Trade {trade_id} ({symbol}) triggering market close: "
+                    f"peak_rr={trade.peak_profit_rr:.3f}R, current_rr={profit_rr:.3f}R, "
+                    f"retrace_threshold={giveback_retrace*100:.0f}% of peak."
+                )
+                success, msg = mt5_adapter.close_order(trade_id, exit_reason="GIVEBACK_GUARD")
+                if success:
+                    trade.state = TradeState.CLOSED
+                    self.active_trades.pop(trade_id, None)
+                    logger.info(f"[GIVEBACK GUARD] Trade {trade_id} successfully closed: {msg}")
+                else:
+                    logger.warning(f"[GIVEBACK GUARD] Failed to close trade {trade_id}: {msg}")
+                continue
+
             # Break-Even Shift Check
             if self.risk_settings.auto_breakeven_enabled and profit_rr >= self.risk_settings.break_even_rr:
                 be_lock_pips = max(2.0, sl_distance_pips * 0.2)
@@ -642,10 +831,10 @@ class TradeManager:
                         trade.sl_price = round(new_sl, digits)
                         logger.info(f"[TRADE MANAGER] Trade {trade_id} shifted to BREAK-EVEN @ {new_sl:.{digits}f}")
 
-            # Delayed Dynamic Trailing Stop Check (Requires profit_rr >= activation_rr [e.g. 1.2R])
+            # Delayed Dynamic Trailing Stop Check (Requires profit_rr >= activation_rr [e.g. 0.6R])
             if self.risk_settings.auto_trailing_stop_enabled and profit_rr >= activation_rr:
                 if is_buy:
-                    candidate_sl = curr_price - (dynamic_trail_pips * pip_size)
+                    candidate_sl = eval_price - (dynamic_trail_pips * pip_size)
                     min_allowed_sl = trade.entry_price + (sl_distance_pips * 0.2 * pip_size)
                     final_sl = max(candidate_sl, min_allowed_sl)
                     
@@ -655,7 +844,7 @@ class TradeManager:
                             trade.sl_price = round(final_sl, digits)
                             logger.info(f"[TRADE MANAGER] Delayed Dynamic Trailing updated for {trade_id} @ {final_sl:.{digits}f} (Dynamic Trail Pips: {dynamic_trail_pips:.1f})")
                 else:
-                    candidate_sl = curr_price + (dynamic_trail_pips * pip_size)
+                    candidate_sl = eval_price + (dynamic_trail_pips * pip_size)
                     max_allowed_sl = trade.entry_price - (sl_distance_pips * 0.2 * pip_size)
                     final_sl = min(candidate_sl, max_allowed_sl)
                     

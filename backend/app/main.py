@@ -18,7 +18,7 @@ from app.api.v1.endpoints import router as api_v1_router
 from app.services.decision_engine import decision_engine
 from app.services.trade_manager import trade_manager
 from app.services.risk_manager import risk_manager
-from app.domain.models import BotStatus
+from app.domain.models import BotStatus, TradeSide
 
 # Configure Logging
 logging.basicConfig(
@@ -109,6 +109,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from fastapi.staticfiles import StaticFiles
+import os
+
+# Mount Static Frontend Directory
+frontend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../frontend"))
+if os.path.exists(frontend_dir):
+    app.mount("/frontend", StaticFiles(directory=frontend_dir, html=True), name="frontend")
+
 # Include API v1 Router
 app.include_router(api_v1_router, prefix=settings.API_V1_STR)
 
@@ -176,12 +184,25 @@ async def websocket_market_endpoint(
                 pending_orders = mt5_adapter.get_pending_orders()
                 history = mt5_adapter.get_history()[:30]
                 
+                fallback_reason = ""
+                if report:
+                    if (report.decision == TradeSide.HOLD or getattr(report.decision, "value", str(report.decision)) == "HOLD") and report.rejection_reasons:
+                        fallback_reason = f"Trade Held: Strategy decision is HOLD. Rejection reasons: {', '.join(report.rejection_reasons[:2])}"
+                    elif report.decision != TradeSide.HOLD and getattr(report.decision, "value", str(report.decision)) != "HOLD":
+                        risk_check = risk_manager.evaluate_risk(account, report, symbol)
+                        if not risk_check.passed:
+                            first_risk = risk_check.reasons[0] if getattr(risk_check, "reasons", None) else "Risk limits exceeded"
+                            fallback_reason = f"Trade Blocked by Risk Guard: {first_risk}"
+                        else:
+                            fallback_reason = f"Executing Trade: {getattr(report.decision, 'value', report.decision)} Signal Ready."
+
                 payload = {
                     "timestamp": datetime.now().isoformat(),
                     "sequence": ws_fallback_seq,
                     "bot_status": trade_manager.bot_status.value,
                     "engine_state": trading_worker.state.value if hasattr(trading_worker, 'state') else "STOPPED",
                     "engine_reason": trading_worker.status_reason if hasattr(trading_worker, 'status_reason') else "",
+                    "auto_trade_live_reason": trading_worker.last_payload.get("auto_trade_live_reason") if (trading_worker.is_running() and trading_worker.last_payload) else fallback_reason,
                     "ticker": ticker.model_dump(mode="json") if ticker else None,
                     "account": account.model_dump(mode="json") if account else None,
                     "candles": [c.model_dump(mode="json") for c in candles[-50:]] if candles else [],

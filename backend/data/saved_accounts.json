@@ -10,7 +10,7 @@
     "currency": "USD",
     "leverage": "1:100",
     "terminal_path": "C:\\Program Files\\MetaTrader 5\\terminal64.exe",
-    "last_connected": "2026-08-19T00:11:51.605601",
+    "last_connected": "2026-09-02T21:29:34.759526",
     "is_active": true
   },
   "110690124@MetaQuotes-Demo": {
@@ -25,6 +25,20 @@
     "leverage": "1:100",
     "terminal_path": "C:\\Program Files\\MetaTrader 5\\terminal64.exe",
     "last_connected": "2026-08-19T19:32:25.949823",
+    "is_active": true
+  },
+  "5055205585@MetaQuotes-Demo": {
+    "id": "5055205585@MetaQuotes-Demo",
+    "name": "Muhammad Haroon Hafeez",
+    "login": 5055205585,
+    "password": "CEw0L30sNps=",
+    "server": "MetaQuotes-Demo",
+    "broker": "MetaQuotes Ltd.",
+    "account_type": "Demo",
+    "currency": "USD",
+    "leverage": "1:100",
+    "terminal_path": "C:\\Program Files\\MetaTrader 5\\terminal64.exe",
+    "last_connected": "2026-09-02T21:29:18.986357",
     "is_active": true
   }
 }

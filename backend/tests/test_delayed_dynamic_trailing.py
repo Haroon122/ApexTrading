@@ -19,10 +19,13 @@ def setup_risk_settings():
     trade_manager.risk_settings.auto_trailing_stop_enabled = True
     trade_manager.risk_settings.auto_breakeven_enabled = True
     trade_manager.risk_settings.trailing_activation_rr = 1.2
+    trade_manager.risk_settings.break_even_rr = 1.0          # freeze at old default for these tests
+    trade_manager.risk_settings.giveback_guard_enabled = False # disable guard — tested separately
     trade_manager.risk_settings.trailing_atr_multiplier = 2.0
     trade_manager.risk_settings.trailing_stop_pips = 15.0
     yield
     trade_manager.risk_settings = original_cfg
+
 
 
 def mock_ticker(price):

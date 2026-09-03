@@ -145,7 +145,7 @@ class DarkVenusStyleBBEngine:
             # Bullish Reversion: Low touches/breaks lower band + bullish rejection
             if low <= bb_lower or prev_close <= float(prev.get("bb_lower", close)):
                 is_bull_rejection = close > open_p or (open_p - low) > body_len * 1.5
-                if is_bull_rejection and percent_b <= 0.20:
+                if is_bull_rejection and percent_b <= 0.20 and h1_trend != "BEARISH":
                     m1_active = True
                     m1_side = TradeSide.BUY
                     m1_conf = 0.82
@@ -154,7 +154,7 @@ class DarkVenusStyleBBEngine:
             # Bearish Reversion: High touches/breaks upper band + bearish rejection
             elif high >= bb_upper or prev_close >= float(prev.get("bb_upper", close)):
                 is_bear_rejection = close < open_p or (high - open_p) > body_len * 1.5
-                if is_bear_rejection and percent_b >= 0.80:
+                if is_bear_rejection and percent_b >= 0.80 and h1_trend != "BULLISH":
                     m1_active = True
                     m1_side = TradeSide.SELL
                     m1_conf = 0.82

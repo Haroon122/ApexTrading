@@ -58,7 +58,7 @@ class MarketStructureEngine:
 
         # 2. BOS & CHoCH
         structure_points, trend_direction = cls._detect_structure_breaks(
-            closes, timestamps, swing_highs, swing_lows
+            closes, timestamps, swing_highs, swing_lows, highs=highs, lows=lows
         )
 
         # 3. Order Blocks
@@ -146,10 +146,20 @@ class MarketStructureEngine:
     @staticmethod
     def _detect_structure_breaks(
         closes, timestamps,
-        swing_highs: List[Dict[str, Any]], swing_lows: List[Dict[str, Any]]
+        swing_highs: List[Dict[str, Any]], swing_lows: List[Dict[str, Any]],
+        highs=None, lows=None
     ) -> Tuple[List[MarketStructurePoint], str]:
         points        = []
         current_trend = "UNKNOWN"
+
+        # Calculate dynamic ATR buffer ($4.50/45 pips min) for hysteresis filtering
+        atr_val = 4.5
+        if highs is not None and lows is not None and len(highs) >= 14:
+            atr_val = max(4.5, (max(highs[-14:]) - min(lows[-14:])) / 14.0)
+        elif len(closes) >= 14:
+            atr_val = max(4.5, (max(closes[-14:]) - min(closes[-14:])) / 14.0)
+
+        buffer = atr_val * 1.5  # Significant price displacement threshold
 
         all_swings = sorted(swing_highs + swing_lows, key=lambda x: x["index"])
 
@@ -162,29 +172,52 @@ class MarketStructureEngine:
             is_high = swing["index"] in high_set
 
             if is_high:
-                if last_high and swing["price"] > last_high["price"]:
+                if last_high and swing["price"] > (last_high["price"] + buffer):
                     points.append(MarketStructurePoint(
                         type="BOS_BULLISH", price=swing["price"], timestamp=swing["timestamp"]
                     ))
                     current_trend = "BULLISH"
-                elif last_low and last_high and current_trend == "BEARISH" and swing["price"] > last_high["price"]:
+                elif last_low and last_high and current_trend == "BEARISH" and swing["price"] > (last_high["price"] + buffer):
                     points.append(MarketStructurePoint(
                         type="CHoCH_BULLISH", price=swing["price"], timestamp=swing["timestamp"]
                     ))
                     current_trend = "BULLISH"
                 last_high = swing
             else:
-                if last_low and swing["price"] < last_low["price"]:
+                if last_low and swing["price"] < (last_low["price"] - buffer):
                     points.append(MarketStructurePoint(
                         type="BOS_BEARISH", price=swing["price"], timestamp=swing["timestamp"]
                     ))
                     current_trend = "BEARISH"
-                elif last_high and last_low and current_trend == "BULLISH" and swing["price"] < last_low["price"]:
+                elif last_high and last_low and current_trend == "BULLISH" and swing["price"] < (last_low["price"] - buffer):
                     points.append(MarketStructurePoint(
                         type="CHoCH_BEARISH", price=swing["price"], timestamp=swing["timestamp"]
                     ))
                     current_trend = "BEARISH"
                 last_low = swing
+
+        # Hysteresis & ATR-buffered 2-candle confirmation trend re-evaluation:
+        if len(closes) >= 2:
+            latest_close = float(closes[-1])
+            prev_close = float(closes[-2])
+
+            if current_trend == "BULLISH":
+                # Require 2 consecutive closes below (last_low - buffer)
+                if last_low is not None:
+                    break_level = last_low["price"] - buffer
+                    if latest_close < break_level and prev_close < break_level:
+                        current_trend = "BEARISH"
+            elif current_trend == "BEARISH":
+                # Require 2 consecutive closes above (last_high + buffer)
+                if last_high is not None:
+                    break_level = last_high["price"] + buffer
+                    if latest_close > break_level and prev_close > break_level:
+                        current_trend = "BULLISH"
+            elif current_trend == "UNKNOWN" and len(closes) >= 5:
+                if closes[-1] > closes[-5] + buffer:
+                    current_trend = "BULLISH"
+                elif closes[-1] < closes[-5] - buffer:
+                    current_trend = "BEARISH"
 
         return points, current_trend
 

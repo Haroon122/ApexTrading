@@ -26,7 +26,8 @@ class GoldTradingWorker:
         self._sequence_num: int = 0
         self.last_payload: Dict[str, Any] = {}
         self.symbol: str = "XAUUSD"  # Will be set to discovered symbol on start/checks
-        self.timeframe: str = "M1"   # Forced to M1 for scalping entry/trigger
+        self.timeframe: str = getattr(getattr(trade_manager, "risk_settings", None), "entry_timeframe", "M1")
+        self.pending_confirmation: Optional[Dict[str, Any]] = None
         self.state: EngineState = EngineState.STOPPED
         self.status_reason: str = "Bot stopped by user."
 
@@ -79,7 +80,7 @@ class GoldTradingWorker:
             
         return True, "Pre-flight checks passed."
 
-    async def start(self, symbol: str = "XAUUSD", timeframe: str = "M1") -> Tuple[bool, str]:
+    async def start(self, symbol: str = "XAUUSD", timeframe: Optional[str] = None) -> Tuple[bool, str]:
         """Starts the background Gold trading task if not already running."""
         async with self._lock:
             # Force Gold discovery
@@ -89,9 +90,17 @@ class GoldTradingWorker:
                 self.status_reason = "Pre-flight failed: Gold symbol not discovered."
                 return False, "Gold/XAUUSD symbol could not be discovered on broker."
             
-            # Override inputs to discovered Gold symbol and M1 trigger
+            # Read entry_timeframe from user risk settings or passed parameter
+            VALID_TIMEFRAMES = ("M1", "M5", "M15", "M30", "H1", "H4", "D1")
+            if timeframe and timeframe.upper() in VALID_TIMEFRAMES:
+                entry_tf = timeframe.upper()
+                trade_manager.update_risk_settings({"entry_timeframe": entry_tf})
+            else:
+                configured_tf = getattr(trade_manager.risk_settings, "entry_timeframe", "M15")
+                entry_tf = configured_tf.upper() if configured_tf and configured_tf.upper() in VALID_TIMEFRAMES else "M15"
+
             symbol = discovered_gold
-            timeframe = "M1"
+            timeframe = entry_tf
 
             if self._running or self._task is not None:
                 if self.symbol.upper() == symbol.upper() and self.timeframe.upper() == timeframe.upper():
@@ -153,9 +162,16 @@ class GoldTradingWorker:
         return self._running
 
     async def _loop(self):
+        VALID_TIMEFRAMES = ("M1", "M5", "M15", "M30", "H1", "H4", "D1")
         while self._running:
             try:
                 self._sequence_num += 1
+
+                # Dynamic sync of entry timeframe from risk settings
+                configured_tf = getattr(trade_manager.risk_settings, "entry_timeframe", "M15")
+                if configured_tf and configured_tf.upper() in VALID_TIMEFRAMES and self.timeframe != configured_tf.upper():
+                    logger.info(f"[TRADING WORKER] Dynamic timeframe change detected: switching active entry timeframe from {self.timeframe} to {configured_tf.upper()}")
+                    self.timeframe = configured_tf.upper()
 
                 # 1. Fetch live market ticker and multi-timeframe candles
                 ticker = mt5_adapter.get_ticker(self.symbol)
@@ -178,64 +194,94 @@ class GoldTradingWorker:
                     "H1": h1_candles,
                     "H4": h4_candles
                 }
-                
-                candles = m1_candles
+                if self.timeframe not in htf_candles:
+                    htf_candles[self.timeframe] = mt5_adapter.fetch_candles(self.symbol, self.timeframe, 100) or m15_candles
+
+                candles = htf_candles.get(self.timeframe, m15_candles)
+                auto_trade_hold_event = None
                 
                 can_trade, reason = trade_manager.can_auto_trade()
-                logger.info(f"[AUTO LOOP] cycle #{self._sequence_num} at {datetime.now()}, symbol={self.symbol}, can_auto_trade={can_trade}, reason={reason}")
+                logger.info(f"[AUTO LOOP] cycle #{self._sequence_num} at {datetime.now()}, symbol={self.symbol}, timeframe={self.timeframe}, can_auto_trade={can_trade}, reason={reason}")
                 
-                # 2. Evaluate Decision Engine & Risk
-                report = decision_engine.evaluate_trade_opportunity(self.symbol, candles, ticker, "M1", htf_candles=htf_candles)
+                # 2. Evaluate Single Authoritative AI Execution Pipeline
+                res = trade_manager.evaluate_and_execute_pipeline(self.symbol, self.timeframe, force_execution=False)
+                report = res.get("report")
+                if not report:
+                    report = decision_engine.evaluate_trade_opportunity(self.symbol, candles, ticker, self.timeframe, htf_candles=htf_candles)
                 
-                # Extract Heartbeat parameters
-                m_price = ticker.bid if ticker else (candles[-1].close if candles else 0.0)
-                regime_str = report.summary_explanation.split("Regime: ")[1].split("\n")[0] if "Regime: " in report.summary_explanation else "UNKNOWN"
-                best_setup_str = report.outweighing_factors[0] if report.outweighing_factors else "NONE"
-                primary_blocker = report.rejection_reasons[0] if report.rejection_reasons else "NONE"
-                
-                logger.info(
-                    f"AUTO_ENGINE_HEARTBEAT | symbol={self.symbol} | timeframe=M1 | "
-                    f"market_price={m_price:.2f} | regime={regime_str} | best_setup={best_setup_str} | "
-                    f"confidence={round(report.confidence*100, 1)}% | decision={report.decision.value} | blocker={primary_blocker}"
-                )
-                
-                # 3. Authoritative position reconciliation & monitoring
+                # Entry Confirmation Mechanism (IMMEDIATE vs CONFIRM_NEXT_CANDLE)
+                confirm_mode = getattr(trade_manager.risk_settings, "entry_confirmation_mode", "IMMEDIATE")
+                if confirm_mode == "CONFIRM_NEXT_CANDLE":
+                    latest_closed = candles[-1] if candles[-1].is_closed else (candles[-2] if len(candles) >= 2 else candles[-1])
+                    
+                    if self.pending_confirmation is not None:
+                        pending_tf = self.pending_confirmation.get("timeframe")
+                        pending_ts = self.pending_confirmation.get("signal_candle_ts")
+                        pending_dir = self.pending_confirmation.get("direction")
+                        pending_close = self.pending_confirmation.get("signal_close", 0.0)
+                        
+                        if latest_closed.timestamp > pending_ts:
+                            atr_val = getattr(candles[-1], 'high', 0.0) - getattr(candles[-1], 'low', 0.0) or 0.30
+                            if pending_dir == "BUY":
+                                is_confirmed = (latest_closed.close >= pending_close - 0.2 * atr_val)
+                            elif pending_dir == "SELL":
+                                is_confirmed = (latest_closed.close <= pending_close + 0.2 * atr_val)
+                            else:
+                                is_confirmed = False
+
+                            if not is_confirmed:
+                                logger.info(f"[ENTRY CONFIRMATION FAILED] {pending_dir} signal on {pending_tf} CANCELLED.")
+                                self.pending_confirmation = None
+                                report.decision = TradeSide.HOLD
+                            else:
+                                self.pending_confirmation = None
+                                logger.info(f"[ENTRY CONFIRMED & RE-VALIDATED] {pending_dir} signal CONFIRMED on {self.timeframe}.")
+                        else:
+                            report.decision = TradeSide.HOLD
+                    elif report.decision != TradeSide.HOLD:
+                        self.pending_confirmation = {
+                            "symbol": self.symbol,
+                            "timeframe": self.timeframe,
+                            "direction": report.decision.value,
+                            "signal_candle_ts": latest_closed.timestamp,
+                            "signal_close": latest_closed.close,
+                            "report": report
+                        }
+                        report.decision = TradeSide.HOLD
+                else:
+                    self.pending_confirmation = None
+
+                # Authoritative position reconciliation & monitoring
                 trade_manager.update_open_positions(self.symbol)
-                
-                # Determine loop state based on actual live MT5 active positions
                 active_pos = mt5_adapter.get_positions()
                 account = mt5_adapter.get_account_info()
                 has_active_pos = any(p.symbol == self.symbol for p in active_pos)
 
-                # 4. Auto-trade autonomous execution if Bot is RUNNING and conditions met
-                if can_trade and report.decision != TradeSide.HOLD:
-                    self.state = EngineState.EXECUTING
-                    self.status_reason = f"Executing {report.decision.value} order..."
-                    
-                    risk_check = risk_manager.evaluate_risk(account, report, self.symbol)
-                    if risk_check.passed:
-                        success, trade, msg = trade_manager.execute_decision(report, risk_check.calculated_lots)
-                        if success:
-                            self.state = EngineState.POSITION_OPEN
-                            self.status_reason = f"Position open: {report.decision.value} trade #{trade.trade_id if trade else 'unknown'}"
-                        else:
-                            self.state = EngineState.ERROR
-                            self.status_reason = f"Order Execution Failed: {msg}"
-                            logger.error(f"[TRADING WORKER] Order placement failed: {msg}")
-                    else:
-                        self.state = EngineState.RUNNING
-                        self.status_reason = f"Risk Rejected: {', '.join(risk_check.reasons)}"
+                # Determine worker state & live hold reason based on authoritative pipeline result
+                if res["success"]:
+                    self.state = EngineState.POSITION_OPEN
+                    self.status_reason = f"Position open: {res['message']}"
+                    live_hold_reason = f"Position Active: {res['message']}"
+                elif res["stage"] in ("EXECUTION_FAILED", "RISK_REJECTED", "PERMISSIONS"):
+                    self.state = EngineState.ERROR
+                    self.status_reason = res["reason"]
+                    live_hold_reason = res["reason"]
+                    logger.error(f"[TRADING WORKER] Pipeline Execution Blocked: {res['reason']}")
+                elif has_active_pos:
+                    self.state = EngineState.MANAGING_POSITION
+                    self.status_reason = f"POSITION_MANAGING — Monitoring {len(active_pos)} active position(s) for {self.symbol}"
+                    live_hold_reason = f"Position Active: Monitoring {len(active_pos)} open position(s) for {self.symbol}."
+                elif self.pending_confirmation is not None:
+                    pending_dir = self.pending_confirmation.get("direction", "SELL")
+                    tf_mins = self.timeframe[1:] if len(self.timeframe) > 1 else "1"
+                    self.state = EngineState.RUNNING
+                    self.status_reason = f"WAITING_CONFIRMATION — {pending_dir} signal pending on {self.timeframe}. Awaiting next candle close confirmation (~{tf_mins} min delay)..."
+                    live_hold_reason = f"Trade Held [Confirmation Delay]: {pending_dir} signal pending on {self.timeframe}. Awaiting next candle close confirmation (~{tf_mins} min delay)."
                 else:
-                    if has_active_pos:
-                        self.state = EngineState.MANAGING_POSITION
-                        self.status_reason = f"POSITION_MANAGING — Monitoring {len(active_pos)} active position(s) for {self.symbol}"
-                    else:
-                        self.state = EngineState.RUNNING
-                        blocker_msg = ""
-                        if report.rejection_reasons:
-                            blocker_msg = " | Blockers: " + ", ".join(report.rejection_reasons[:2])
-                        self.status_reason = f"SCANNING_MARKET — Waiting for valid setup... (LONG: {round(report.long_score*100,1)}%, SHORT: {round(report.short_score*100,1)}%){blocker_msg}"
-                
+                    self.state = EngineState.RUNNING
+                    self.status_reason = f"SCANNING_MARKET — {res['reason']}"
+                    live_hold_reason = res["reason"]
+
                 # 5. Fetch fresh account info, positions, pending orders, and history after execution
                 account = mt5_adapter.get_account_info()
                 pending_orders = mt5_adapter.get_pending_orders()
@@ -248,6 +294,8 @@ class GoldTradingWorker:
                     "bot_status": trade_manager.bot_status.value,
                     "engine_state": self.state.value,
                     "engine_reason": self.status_reason,
+                    "auto_trade_live_reason": live_hold_reason,
+                    "auto_trade_hold_event": auto_trade_hold_event,
                     "ticker": ticker.model_dump(mode="json") if ticker else None,
                     "account": account.model_dump(mode="json") if account else None,
                     "candles": [c.model_dump(mode="json") for c in candles[-50:]] if candles else [],

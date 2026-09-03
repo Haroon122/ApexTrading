@@ -435,11 +435,25 @@ class MT5Adapter:
             account = self.session_manager.get_account_info()
             from app.services.trade_manager import trade_manager
             max_risk_pct = float(getattr(trade_manager.risk_settings, "max_risk_per_trade_pct", settings.MAX_RISK_PER_TRADE_PCT))
-            max_risk_usd = account.equity * (max_risk_pct / 100.0)
+            max_risk_usd = account.equity * (max_risk_pct / 100.0) if account and hasattr(account, 'equity') and account.equity > 0 else 500.0
             
-            # If calculated risk exceeds settings limit, reject the order
+            # If calculated risk exceeds settings limit, attempt to scale requested lots down to fit max risk limit
             if recalc_risk_usd > max_risk_usd * 1.05 and max_risk_usd > 0:
-                return False, 0.0, 0.0, 0.0, 0.0, f"Recalculated risk of ${recalc_risk_usd:.2f} exceeds maximum allowed risk of ${max_risk_usd:.2f} ({max_risk_pct}% of equity). Trade rejected."
+                calc_safe_lots = max_risk_usd / (sl_pips * pip_val + 1e-9)
+                vol_step = float(specs.get("volume_step", 0.01) or 0.01)
+                vol_min = float(specs.get("volume_min", 0.01) or 0.01)
+                
+                scaled_lots = round(round(calc_safe_lots / vol_step) * vol_step, 2)
+                if scaled_lots < vol_min:
+                    scaled_lots = vol_min
+                
+                new_risk_usd = scaled_lots * sl_pips * pip_val
+                if scaled_lots < norm_lots:
+                    logger.info(f"[RISK ADAPTER AUTO-SCALE] Auto-scaled requested lots from {norm_lots:.2f} down to {scaled_lots:.2f} to fit max risk limit of ${max_risk_usd:.2f} (New Risk: ${new_risk_usd:.2f})")
+                    norm_lots = scaled_lots
+                    recalc_risk_usd = new_risk_usd
+                elif recalc_risk_usd > max_risk_usd * 1.25:
+                    return False, 0.0, 0.0, 0.0, 0.0, f"Recalculated risk of ${recalc_risk_usd:.2f} exceeds maximum allowed risk of ${max_risk_usd:.2f} ({max_risk_pct}% of equity). Trade rejected."
             
             # If TP is also set, verify R:R ratio
             if norm_tp > 0:
@@ -463,8 +477,8 @@ class MT5Adapter:
                 if not valid:
                     return False, None, val_msg
 
-                # Pre-Send Safety Check: Volume Mismatch Guard
-                if abs(norm_lots - lots) > 0.05 * max(lots, 0.01) and abs(norm_lots - lots) > 0.01:
+                # Pre-Send Safety Check: Volume Mismatch Guard (Allow intentional risk scale-down)
+                if norm_lots > lots and (abs(norm_lots - lots) > 0.05 * max(lots, 0.01) and abs(norm_lots - lots) > 0.01):
                     err_msg = f"ORDER BLOCKED — VOLUME MISMATCH: Requested {lots:.2f} lots, but normalized volume became {norm_lots:.2f} lots. Order was NOT sent to broker."
                     logger.error(f"[MT5 ADAPTER SAFETY BLOCK] {err_msg}")
                     from app.services.trade_manager import trade_manager

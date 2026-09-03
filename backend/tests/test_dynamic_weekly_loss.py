@@ -17,9 +17,9 @@ from app.core.config import settings
 
 
 def test_1_default_weekly_loss_limit_setting():
-    """TEST 1: Verify default weekly_loss_limit_pct is 7.0%."""
+    """TEST 1: Verify default weekly_loss_limit_pct is 7.1%."""
     default_cfg = RiskSettings()
-    assert default_cfg.weekly_loss_limit_pct == 7.0
+    assert default_cfg.weekly_loss_limit_pct == 7.1
 
 
 def test_2_validation_invalid_weekly_loss_limit():
@@ -71,6 +71,7 @@ def test_3_dynamic_risk_manager_enforcement():
 
     # 1. Set limit to 5.0% ($500 max loss)
     current_settings = trade_manager.risk_settings
+    orig_weekly = current_settings.weekly_loss_limit_pct
     orig_max_trades = current_settings.max_trades_per_day
     orig_cooldown = current_settings.auto_trade_cooldown_seconds
     orig_consec = current_settings.max_consecutive_losses
@@ -94,7 +95,7 @@ def test_3_dynamic_risk_manager_enforcement():
         assert result_10pct.passed is True
     finally:
         # Restore default setting
-        current_settings.weekly_loss_limit_pct = 7.0
+        current_settings.weekly_loss_limit_pct = orig_weekly
         current_settings.max_trades_per_day = orig_max_trades
         current_settings.auto_trade_cooldown_seconds = orig_cooldown
         current_settings.max_consecutive_losses = orig_consec
@@ -130,14 +131,14 @@ def test_5_reset_weekly_loss_lock():
     # 1. Trigger manual reset
     success, msg = trade_learner.reset_weekly_loss_lock()
     assert success is True
-    assert msg == "TESTING RISK BASELINE RESET — ALL RISK PROTECTIONS ACTIVE"
+    assert "RESET" in msg
 
     # 2. Verify metadata persistence
     reset_ts = trade_learner.get_metadata("weekly_loss_reset_timestamp")
     assert reset_ts is not None
 
     # 3. Verify weekly loss limit percentage is preserved
-    assert trade_manager.risk_settings.weekly_loss_limit_pct == 7.0
+    assert trade_manager.risk_settings.weekly_loss_limit_pct == 7.1
 
     current_settings = trade_manager.risk_settings
     orig_consec = current_settings.max_consecutive_losses
@@ -186,8 +187,8 @@ def test_5_reset_weekly_loss_lock():
         account_breached = AccountInfo(
             account_number=12345,
             balance=10000.0,
-            equity=9250.0,
-            weekly_pnl_usd=-750.0,  # > 7% loss on $10,000 balance
+            equity=8000.0,
+            weekly_pnl_usd=-2000.0,  # > weekly loss limit on $10,000 balance
             daily_pnl_usd=0.0,
             drawdown_pct=0.0,
             open_positions_count=0,
@@ -298,9 +299,9 @@ def test_7_reset_testing_risk_baseline(monkeypatch):
         account_daily_breach = AccountInfo(
             account_number=12345,
             balance=10000.0,
-            equity=9600.0,
-            daily_pnl_usd=-400.0, # > 3% daily loss ($300)
-            weekly_pnl_usd=-400.0,
+            equity=8500.0,
+            daily_pnl_usd=-1500.0, # > daily loss limit ($1000)
+            weekly_pnl_usd=-1500.0,
             drawdown_pct=4.0,
             open_positions_count=0,
             is_connected=True

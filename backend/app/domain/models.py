@@ -6,7 +6,7 @@ Clean Architecture Data Definitions for Trading System
 from datetime import datetime
 from enum import Enum
 from typing import List, Dict, Optional, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class TradeSide(str, Enum):
@@ -234,6 +234,7 @@ class TradeRecord(BaseModel):
     close_price: Optional[float] = None
     pnl_usd: float = 0.0
     pnl_pips: float = 0.0
+    peak_profit_rr: float = 0.0
     exit_reason: Optional[str] = None
     ai_confidence_at_entry: float = 0.80
     entry_reasoning: List[str] = []
@@ -273,33 +274,45 @@ class ManualOrderRequest(BaseModel):
     symbol: str
     side: TradeSide
     order_type: OrderType = OrderType.MARKET
-    lots: float = 0.1
+    lots: float = 0.01
     price: Optional[float] = 0.0
     sl: Optional[float] = 0.0
     tp: Optional[float] = 0.0
 
 
 class RiskSettings(BaseModel):
-    max_risk_per_trade_pct: float = 1.0
-    daily_loss_limit_pct: float = 3.0
-    weekly_loss_limit_pct: float = Field(default=7.0, gt=0.0, le=100.0)
-    max_daily_loss_amount: float = 500.0
+    max_risk_per_trade_pct: float = 1.5
+    daily_loss_limit_pct: float = 5.0
+    weekly_loss_limit_pct: float = Field(default=7.1, gt=0.0, le=100.0)
+
+    @field_validator("weekly_loss_limit_pct", mode="after")
+    @classmethod
+    def validate_weekly_loss_limit(cls, v: float) -> float:
+        if v <= 0.0 or v > 100.0:
+            raise ValueError("weekly_loss_limit_pct must be > 0.0 and <= 100.0")
+        return v
+    max_daily_loss_amount: float = 5.0
     max_open_positions: int = 5
     min_risk_reward_ratio: float = 2.0
     trading_mode_profile: str = "BALANCED"  # CONSERVATIVE, BALANCED, AGGRESSIVE
     strategy_profile: str = "HYBRID_AUTO"  # HYBRID_AUTO, BB_MEAN_REVERSION, BB_TREND_FOLLOWING, BB_BREAKOUT, INSTITUTIONAL_ONLY
     signal_mode: str = "CLOSED_CANDLE"  # CLOSED_CANDLE or CURRENT_CANDLE
+    entry_timeframe: str = "M15"  # M15 (default), M5, M1, M30, H1, H4, D1
+    entry_confirmation_mode: str = "IMMEDIATE"  # IMMEDIATE (default) or CONFIRM_NEXT_CANDLE
     bb_period: int = 20
     bb_std: float = 2.0
     allowed_sessions: List[str] = ["ASIAN", "LONDON", "NEWYORK", "LONDON_NY_OVERLAP"]
-    lot_sizing_mode: str = "FIXED"  # "FIXED" or "DYNAMIC_RISK"
-    user_configured_lot: float = 0.10
-    max_allowed_lot: float = 1.00
-    default_lot_size: float = 0.1
+    lot_sizing_mode: str = "DYNAMIC_RISK"  # "FIXED" or "DYNAMIC_RISK"
+    user_configured_lot: float = 0.01
+    max_allowed_lot: float = 0.10
+    default_lot_size: float = 0.01
     trailing_stop_pips: float = 15.0
     trailing_activation_rr: float = 1.2
     trailing_atr_multiplier: float = 2.0
     break_even_rr: float = 1.0
+    giveback_guard_enabled: bool = True
+    giveback_guard_min_rr: float = 0.8
+    giveback_guard_retrace_pct: float = 50.0
     auto_breakeven_enabled: bool = True
     auto_trailing_stop_enabled: bool = True
     min_ai_confidence: float = 0.70
@@ -309,6 +322,10 @@ class RiskSettings(BaseModel):
     max_consecutive_losses: int = 3
     max_spread_pips: float = 2.5
     enable_live_trading: bool = False
+    htf_alignment_filter_enabled: bool = True
+    htf_alignment_mode: str = "MODERATE"
+    disabled_setups: List[str] = Field(default_factory=list)
+    active_model_version: Optional[str] = None
 
 
 

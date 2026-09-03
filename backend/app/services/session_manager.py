@@ -885,8 +885,9 @@ class MT5SessionManager:
                 from datetime import timedelta
                 from app.services.trade_learner import trade_learner
                 
-                from_date = datetime.now() - timedelta(days=7)
-                to_date = datetime.now() + timedelta(days=1)
+                now_server = trade_learner.get_broker_current_time()
+                from_date = now_server - timedelta(days=14)
+                to_date = now_server + timedelta(days=2)
                 
                 history_deals = mt5.history_deals_get(from_date, to_date)
                 if history_deals:
@@ -922,8 +923,12 @@ class MT5SessionManager:
                             lots = d.volume
                             pnl_usd = round(d.profit + d.swap + d.commission, 2)
                             close_time = datetime.fromtimestamp(d.time)
-                            comment = d.comment or "CLOSED"
-                            
+                            setup_name_val = "Unknown"
+                            from app.services.trade_manager import trade_manager
+                            if trade_id in trade_manager.active_trades:
+                                setup_name_val = trade_manager.active_trades[trade_id].setup_name or "Unknown"
+
+                            deal_comment = getattr(d, 'comment', 'CLOSED') or 'CLOSED'
                             trade_learner.sync_deal_to_db(
                                 trade_id=trade_id,
                                 symbol=d.symbol,
@@ -934,7 +939,8 @@ class MT5SessionManager:
                                 pnl_usd=pnl_usd,
                                 open_time=open_time,
                                 close_time=close_time,
-                                comment=comment
+                                comment=deal_comment,
+                                setup_name=setup_name_val
                             )
 
                 # Reconciliation discrepancy check for pending database trades
@@ -952,11 +958,44 @@ class MT5SessionManager:
                         deals = None
                         if str(tid).isdigit():
                             deals = mt5.history_deals_get(position=int(tid))
-                        if not deals:
-                            logger.error(
-                                f"[RECONCILIATION DISCREPANCY] Trade #{tid} ({pt['symbol']}) is no longer active, "
-                                f"but no exit deals were found in MT5 history! Mark as discrepancy."
-                            )
+
+                        if deals:
+                            exit_deal = next((d for d in deals if getattr(d, 'entry', 0) == 1), None)
+                            if exit_deal:
+                                entry_deal = next((d for d in deals if getattr(d, 'entry', 0) == 0), None)
+                                entry_price = entry_deal.price if entry_deal else exit_deal.price
+                                open_time = datetime.fromtimestamp(entry_deal.time) if entry_deal else datetime.fromtimestamp(exit_deal.time)
+                                side = "BUY" if (entry_deal and entry_deal.type == 0) else ("BUY" if exit_deal.type == 1 else "SELL")
+                                pnl_usd = round(exit_deal.profit + exit_deal.swap + exit_deal.commission, 2)
+                                close_time = datetime.fromtimestamp(exit_deal.time)
+                                comment = getattr(exit_deal, 'comment', 'CLOSED') or 'CLOSED'
+                                setup_name_val = "Unknown"
+                                from app.services.trade_manager import trade_manager
+                                if str(tid) in trade_manager.active_trades:
+                                    setup_name_val = trade_manager.active_trades[str(tid)].setup_name or "Unknown"
+                                
+                                trade_learner.sync_deal_to_db(
+                                    trade_id=str(tid),
+                                    symbol=exit_deal.symbol,
+                                    side=side,
+                                    entry_price=entry_price,
+                                    exit_price=exit_deal.price,
+                                    lots=exit_deal.volume,
+                                    pnl_usd=pnl_usd,
+                                    open_time=open_time,
+                                    close_time=close_time,
+                                    comment=comment,
+                                    setup_name=setup_name_val
+                                )
+                                logger.info(f"[RECONCILIATION SUCCESS] Synced exit deal for pending trade #{tid} ({exit_deal.symbol}) to DB")
+                                continue
+
+                        logger.error(
+                            f"[RECONCILIATION DISCREPANCY] Trade #{tid} ({pt['symbol']}) is no longer active, "
+                            f"but no exit deals were found in MT5 history! Marking as discrepancy."
+                        )
+                        trade_learner.mark_trade_discrepancy(str(tid), reason="RECONCILIATION_DISCREPANCY")
+
             except Exception as e:
                 logger.error(f"[SESSION MANAGER] Error in sync_history_to_sqlite: {e}")
 

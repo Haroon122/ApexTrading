@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,11 +9,14 @@
     <!-- Google Fonts & FontAwesome -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap"
+        rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    
+
     <link rel="stylesheet" href="styles.css">
 </head>
+
 <body class="dark-theme">
 
     <!-- Top Navigation Header -->
@@ -58,17 +62,22 @@
         </div>
 
         <div class="header-controls">
-            <button class="btn btn-outline" id="btn-open-pkt-schedule" title="View Pakistan Standard Time (PKT) Trading Schedule Widget" style="border-color: rgba(245, 158, 11, 0.4); color: #f59e0b;">
+            <button class="btn btn-outline" id="btn-open-pkt-schedule"
+                title="View Pakistan Standard Time (PKT) Trading Schedule Widget"
+                style="border-color: rgba(245, 158, 11, 0.4); color: #f59e0b;">
                 <i class="fa-solid fa-clock"></i> PKT Timetable
             </button>
-            <button class="btn btn-outline btn-sm" id="btn-refresh-account" title="Manually refresh balance, equity, positions & orders">
+            <button class="btn btn-outline btn-sm" id="btn-refresh-account"
+                title="Manually refresh balance, equity, positions & orders">
                 <i class="fa-solid fa-rotate"></i> Refresh Account
             </button>
-            <button class="status-indicator clickable" id="btn-open-mt5-manager" title="Click to manage MT5 Account credentials">
+            <button class="status-indicator clickable" id="btn-open-mt5-manager"
+                title="Click to manage MT5 Account credentials">
                 <span class="pulse-dot green" id="status-dot"></span>
                 <span class="status-text" id="status-mode">Connected</span>
             </button>
-            <button class="btn btn-outline" id="btn-open-settings" title="Configure risk parameters, loss limits, and auto-trading mode">
+            <button class="btn btn-outline" id="btn-open-settings"
+                title="Configure risk parameters, loss limits, and auto-trading mode">
                 <i class="fa-solid fa-sliders"></i> Risk Settings
             </button>
         </div>
@@ -83,10 +92,11 @@
             <!-- Market Selector & Timeframes -->
             <div class="sidebar-section">
                 <h3 class="section-title"><i class="fa-solid fa-coins"></i> Market Symbol & Timeframe</h3>
-                
+
                 <div class="control-group">
                     <label>Trading Pair / Instrument</label>
-                    <select id="select-symbol" class="form-control" title="Select target trading pair or financial instrument">
+                    <select id="select-symbol" class="form-control"
+                        title="Select target trading pair or financial instrument">
                         <option value="XAUUSD" selected>XAUUSD (Gold / US Dollar)</option>
                         <option value="GOLD">GOLD (Gold / USD)</option>
                     </select>
@@ -95,8 +105,10 @@
                 <div class="control-group">
                     <label>Custom Ticker Input (e.g. EURUSD.a)</label>
                     <div class="input-with-btn">
-                        <input type="text" id="custom-symbol-input" class="form-control" placeholder="Enter MT5 Symbol..." title="Enter custom MT5 symbol identifier">
-                        <button class="btn btn-sm btn-outline" id="btn-apply-custom-symbol" title="Apply custom symbol to chart and stream">Set</button>
+                        <input type="text" id="custom-symbol-input" class="form-control"
+                            placeholder="Enter MT5 Symbol..." title="Enter custom MT5 symbol identifier">
+                        <button class="btn btn-sm btn-outline" id="btn-apply-custom-symbol"
+                            title="Apply custom symbol to chart and stream">Set</button>
                     </div>
                 </div>
 
@@ -119,10 +131,11 @@
             <!-- Manual Order Execution Panel -->
             <div class="sidebar-section">
                 <h3 class="section-title"><i class="fa-solid fa-hand-pointer"></i> Manual Order Execution</h3>
-                
+
                 <div class="control-group">
                     <label>Order Type</label>
-                    <select id="manual-order-type" class="form-control" title="Select order execution type (Market, Limit, Stop)">
+                    <select id="manual-order-type" class="form-control"
+                        title="Select order execution type (Market, Limit, Stop)">
                         <option value="MARKET" selected>MARKET ORDER</option>
                         <option value="BUY_LIMIT">BUY LIMIT</option>
                         <option value="SELL_LIMIT">SELL LIMIT</option>
@@ -133,34 +146,40 @@
 
                 <div class="control-group" id="pending-price-group" style="display:none;">
                     <label>Target Price</label>
-                    <input type="number" step="0.00001" id="manual-target-price" class="form-control" placeholder="0.00000" title="Pending order entry target price">
+                    <input type="number" step="0.00001" id="manual-target-price" class="form-control"
+                        placeholder="0.00000" title="Pending order entry target price">
                 </div>
 
                 <div class="control-group">
                     <label>Volume / Lot Size</label>
                     <div class="lot-adjust-group">
-                        <button class="btn-lot-adjust" id="btn-lot-minus" title="Decrease lot size by 0.05">-</button>
-                        <input type="number" step="0.01" id="manual-lots" class="form-control text-center-input" value="0.10" title="Trade volume in standard lots">
-                        <button class="btn-lot-adjust" id="btn-lot-plus" title="Increase lot size by 0.05">+</button>
+                        <button class="btn-lot-adjust" id="btn-lot-minus" title="Decrease lot size by 0.01">-</button>
+                        <input type="number" step="0.01" id="manual-lots" class="form-control text-center-input"
+                            value="0.01" title="Trade volume in standard lots">
+                        <button class="btn-lot-adjust" id="btn-lot-plus" title="Increase lot size by 0.01">+</button>
                     </div>
                 </div>
 
                 <div class="grid-2col">
                     <div class="control-group">
                         <label>Stop Loss (SL)</label>
-                        <input type="number" step="0.00001" id="manual-sl-price" class="form-control" placeholder="Auto / Price" title="Stop Loss price level">
+                        <input type="number" step="0.00001" id="manual-sl-price" class="form-control"
+                            placeholder="Auto / Price" title="Stop Loss price level">
                     </div>
                     <div class="control-group">
                         <label>Take Profit (TP)</label>
-                        <input type="number" step="0.00001" id="manual-tp-price" class="form-control" placeholder="Auto / Price" title="Take Profit price level">
+                        <input type="number" step="0.00001" id="manual-tp-price" class="form-control"
+                            placeholder="Auto / Price" title="Take Profit price level">
                     </div>
                 </div>
 
                 <div class="action-buttons-grid">
-                    <button class="btn btn-buy btn-block" id="btn-manual-buy" title="Execute instant Market BUY / LONG order">
+                    <button class="btn btn-buy btn-block" id="btn-manual-buy"
+                        title="Execute instant Market BUY / LONG order">
                         <i class="fa-solid fa-arrow-trend-up"></i> BUY / LONG
                     </button>
-                    <button class="btn btn-sell btn-block" id="btn-manual-sell" title="Execute instant Market SELL / SHORT order">
+                    <button class="btn btn-sell btn-block" id="btn-manual-sell"
+                        title="Execute instant Market SELL / SHORT order">
                         <i class="fa-solid fa-arrow-trend-down"></i> SELL / SHORT
                     </button>
                 </div>
@@ -169,10 +188,22 @@
             <!-- AI Auto Trading Control Center -->
             <div class="sidebar-section">
                 <h3 class="section-title"><i class="fa-solid fa-robot"></i> AI Auto Trading Mode</h3>
-                
-                <div class="info-row" style="margin-bottom: 12px; border-bottom: none;">
+
+                <div class="info-row" style="margin-bottom: 8px; border-bottom: none;">
                     <span>Engine Status:</span>
                     <strong id="bot-status-badge" class="badge-bot-status status-stopped">STOPPED</strong>
+                </div>
+
+                <!-- Sidebar Live Auto-Trade Runtime Reason Box -->
+                <div id="sidebar-auto-trade-reason-container" class="hidden"
+                    style="font-size: 11px; color: var(--text-muted); background: rgba(15, 23, 42, 0.6); padding: 8px 10px; border-radius: 4px; border: 1px solid rgba(245, 158, 11, 0.35); margin-bottom: 12px; line-height: 1.4;">
+                    <div
+                        style="color: var(--accent-amber); font-weight: 700; font-size: 10px; text-transform: uppercase; margin-bottom: 3px; display: flex; align-items: center; gap: 5px;">
+                        <i class="fa-solid fa-circle-info"></i> Auto Trade Runtime Status
+                    </div>
+                    <div id="sidebar-auto-trade-reason"
+                        style="color: #e2e8f0; font-family: var(--font-mono, monospace); font-size: 11px; word-break: break-word;">
+                        Evaluating market...</div>
                 </div>
 
                 <div class="bot-control-grid">
@@ -188,13 +219,16 @@
             <!-- Actions & Backtest -->
             <div class="sidebar-section">
                 <div class="action-buttons">
-                    <button class="btn btn-emerald btn-block" id="btn-evaluate-now" title="Run full 5-pillar market analysis pipeline">
+                    <button class="btn btn-emerald btn-block" id="btn-evaluate-now"
+                        title="Run full 5-pillar market analysis pipeline">
                         <i class="fa-solid fa-magnifying-glass-chart"></i> Analyze Market
                     </button>
-                    <button class="btn btn-cyan btn-block" id="btn-execute-now" title="Evaluate and execute validated AI trade signal">
+                    <button class="btn btn-cyan btn-block" id="btn-execute-now"
+                        title="Evaluate and execute validated AI trade signal">
                         <i class="fa-solid fa-bolt"></i> Execute AI Signal
                     </button>
-                    <button class="btn btn-purple btn-block" id="btn-run-backtest" title="Run historical strategy backtest engine">
+                    <button class="btn btn-purple btn-block" id="btn-run-backtest"
+                        title="Run historical strategy backtest engine">
                         <i class="fa-solid fa-history"></i> Strategy Backtest Engine
                     </button>
                 </div>
@@ -230,6 +264,10 @@
                     <div class="info-row" data-risk-field="cfg-trading-mode">
                         <span>Strategy Mode:</span>
                         <strong id="risk-mode-badge" class="text-cyan">BALANCED</strong>
+                    </div>
+                    <div class="info-row" data-risk-field="cfg-entry-confirmation-mode">
+                        <span>Entry Confirmation:</span>
+                        <strong id="risk-entry-confirm-badge" class="text-emerald">IMMEDIATE</strong>
                     </div>
                     <div class="info-row" data-risk-field="cfg-lot-mode">
                         <span>Lot Sizing Mode:</span>
@@ -272,7 +310,9 @@
                         <strong id="risk-live-trading-badge" class="text-amber">DEMO ONLY</strong>
                     </div>
                     <div style="margin-top: 10px; display: flex; flex-direction: column; gap: 6px;">
-                        <button type="button" class="btn btn-amber btn-block btn-sm" id="btn-sidebar-reset-testing-risk-baseline" title="Manually clear circuit breaker locks and reset testing session risk baselines">
+                        <button type="button" class="btn btn-amber btn-block btn-sm"
+                            id="btn-sidebar-reset-testing-risk-baseline"
+                            title="Manually clear circuit breaker locks and reset testing session risk baselines">
                             <i class="fa-solid fa-rotate-left"></i> Reset Testing Risk Baseline
                         </button>
                     </div>
@@ -280,8 +320,51 @@
             </div>
         </aside>
 
+        <!-- Floating 4-Second Auto-Trade Execution Held / Rejected Notification Popup -->
+        <div id="auto-trade-popup-container" class="auto-trade-popup-container hidden">
+            <div class="auto-trade-popup-card" id="auto-trade-popup-card">
+                <div class="popup-header">
+                    <div class="popup-title-group">
+                        <i class="fa-solid fa-shield-cat popup-icon"></i>
+                        <span class="popup-title">AUTO-TRADE EXECUTION HELD</span>
+                    </div>
+                    <span class="popup-signal-badge badge-buy" id="popup-signal-badge">BUY SIGNAL</span>
+                    <button type="button" class="popup-close-btn" id="popup-close-btn" title="Dismiss Popup"><i
+                            class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="popup-body">
+                    <p class="popup-reason-text" id="popup-reason-text">Trade cannot be executed automatically: Reason
+                        goes here...</p>
+                </div>
+                <div class="popup-progress-track">
+                    <div class="popup-progress-bar" id="popup-progress-bar"></div>
+                </div>
+            </div>
+        </div>
+
         <!-- Main Chart & Analytics Area -->
         <main class="chart-container-wrapper">
+
+            <!-- Live Auto-Trading Runtime Status & Hold Reason Banner -->
+            <div id="auto-trade-live-status-banner" class="trade-alert-banner alert-rejected hidden"
+                style="border-left-color: #f59e0b; background: rgba(15, 23, 42, 0.95); margin-bottom: 12px; box-shadow: 0 0 15px rgba(245, 158, 11, 0.15);">
+                <div class="trade-alert-content">
+                    <div class="trade-alert-icon" style="color: #f59e0b;">
+                        <i class="fa-solid fa-robot fa-spin-pulse"></i>
+                    </div>
+                    <div class="trade-alert-text">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <h4 style="margin: 0; font-size: 0.92rem; color: #fff; font-weight: 700;">AI AUTO-TRADING
+                                RUNTIME STATUS</h4>
+                            <span id="auto-trade-live-tf-badge" class="badge-ai"
+                                style="background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.4); font-size: 10px; padding: 2px 6px;">RUNNING</span>
+                        </div>
+                        <p id="auto-trade-live-reason"
+                            style="margin: 4px 0 0 0; font-size: 0.85rem; color: #cbd5e1; font-family: var(--font-mono, monospace);">
+                            Scanning live market structure and indicators...</p>
+                    </div>
+                </div>
+            </div>
 
             <!-- Trade Execution Notification / Rejection Alert Banner -->
             <div id="trade-execution-alert" class="trade-alert-banner hidden">
@@ -294,10 +377,11 @@
                         <p id="trade-alert-message">Trade execution message</p>
                         <div id="trade-alert-instructions" class="alert-instructions hidden"></div>
                     </div>
-                    <button class="trade-alert-close" onclick="closeTradeAlert()" title="Close Alert"><i class="fa-solid fa-xmark"></i></button>
+                    <button class="trade-alert-close" onclick="closeTradeAlert()" title="Close Alert"><i
+                            class="fa-solid fa-xmark"></i></button>
                 </div>
             </div>
-            
+
             <!-- Chart Header Bar & Professional Controls -->
             <div class="chart-header-bar">
                 <div class="pair-info">
@@ -311,21 +395,39 @@
 
                 <!-- TradingView-Style Drawing Toolbar -->
                 <div class="drawing-toolbar">
-                    <button class="btn-drawing-tool active" id="tool-crosshairs" title="Crosshair"><i class="fa-solid fa-crosshairs"></i></button>
-                    <button class="btn-drawing-tool" id="tool-trendline" title="Draw Trendline"><i class="fa-solid fa-slash"></i></button>
-                    <button class="btn-drawing-tool" id="tool-hline" title="Horizontal Line"><i class="fa-solid fa-grip-lines"></i></button>
-                    <button class="btn-drawing-tool" id="tool-rectangle" title="Rectangle Zone"><i class="fa-regular fa-square"></i></button>
-                    <button class="btn-drawing-tool" id="tool-fibo" title="Fibonacci Retracement"><i class="fa-solid fa-bars-staggered"></i></button>
-                    <button class="btn-drawing-tool text-red" id="tool-clear-drawings" title="Clear Drawings"><i class="fa-solid fa-trash-can"></i></button>
+                    <button class="btn-drawing-tool active" id="tool-crosshairs" title="Crosshair"><i
+                            class="fa-solid fa-crosshairs"></i></button>
+                    <button class="btn-drawing-tool" id="tool-trendline" title="Draw Trendline"><i
+                            class="fa-solid fa-slash"></i></button>
+                    <button class="btn-drawing-tool" id="tool-hline" title="Horizontal Line"><i
+                            class="fa-solid fa-grip-lines"></i></button>
+                    <button class="btn-drawing-tool" id="tool-rectangle" title="Rectangle Zone"><i
+                            class="fa-regular fa-square"></i></button>
+                    <button class="btn-drawing-tool" id="tool-fibo" title="Fibonacci Retracement"><i
+                            class="fa-solid fa-bars-staggered"></i></button>
+                    <button class="btn-drawing-tool text-red" id="tool-clear-drawings" title="Clear Drawings"><i
+                            class="fa-solid fa-trash-can"></i></button>
                 </div>
-                
+
                 <div class="chart-controls">
-                    <button class="btn-chart-tool active" id="toggle-ema" title="Toggle Exponential Moving Average ribbon (EMA 20/50/200)"><i class="fa-solid fa-wave-square"></i> EMA Ribbon</button>
-                    <button class="btn-chart-tool active" id="toggle-vwap" title="Toggle Volume Weighted Average Price (VWAP)"><i class="fa-solid fa-chart-area"></i> VWAP</button>
-                    <button class="btn-chart-tool active" id="toggle-bollinger" title="Toggle Bollinger Bands volatility channel"><i class="fa-solid fa-chart-line"></i> Bollinger</button>
-                    <button class="btn-chart-tool active" id="toggle-ob" title="Toggle Smart Money Order Blocks & Fair Value Gaps"><i class="fa-solid fa-boxes-stacked"></i> Order Blocks</button>
-                    <button class="btn-chart-tool active" id="toggle-rsi" title="Toggle Relative Strength Index (RSI) subchart"><i class="fa-solid fa-chart-bar"></i> RSI Subchart</button>
-                    <button class="btn-chart-tool active" id="toggle-macd" title="Toggle Moving Average Convergence Divergence (MACD) subchart"><i class="fa-solid fa-signal"></i> MACD Subchart</button>
+                    <button class="btn-chart-tool active" id="toggle-ema"
+                        title="Toggle Exponential Moving Average ribbon (EMA 20/50/200)"><i
+                            class="fa-solid fa-wave-square"></i> EMA Ribbon</button>
+                    <button class="btn-chart-tool active" id="toggle-vwap"
+                        title="Toggle Volume Weighted Average Price (VWAP)"><i class="fa-solid fa-chart-area"></i>
+                        VWAP</button>
+                    <button class="btn-chart-tool active" id="toggle-bollinger"
+                        title="Toggle Bollinger Bands volatility channel"><i class="fa-solid fa-chart-line"></i>
+                        Bollinger</button>
+                    <button class="btn-chart-tool active" id="toggle-ob"
+                        title="Toggle Smart Money Order Blocks & Fair Value Gaps"><i
+                            class="fa-solid fa-boxes-stacked"></i> Order Blocks</button>
+                    <button class="btn-chart-tool active" id="toggle-rsi"
+                        title="Toggle Relative Strength Index (RSI) subchart"><i class="fa-solid fa-chart-bar"></i> RSI
+                        Subchart</button>
+                    <button class="btn-chart-tool active" id="toggle-macd"
+                        title="Toggle Moving Average Convergence Divergence (MACD) subchart"><i
+                            class="fa-solid fa-signal"></i> MACD Subchart</button>
                 </div>
             </div>
 
@@ -333,10 +435,14 @@
             <div class="canvas-chart-holder" id="canvas-holder">
                 <canvas id="financialChartCanvas"></canvas>
                 <div class="chart-zoom-controls">
-                    <button class="btn-zoom" id="btn-zoom-in" title="Zoom In Chart"><i class="fa-solid fa-plus"></i></button>
-                    <button class="btn-zoom" id="btn-zoom-out" title="Zoom Out Chart"><i class="fa-solid fa-minus"></i></button>
-                    <button class="btn-zoom" id="btn-zoom-reset" title="Reset View & Pan"><i class="fa-solid fa-rotate-left"></i></button>
-                    <button class="btn-zoom" id="btn-fullscreen" title="Toggle Fullscreen Chart"><i class="fa-solid fa-expand"></i></button>
+                    <button class="btn-zoom" id="btn-zoom-in" title="Zoom In Chart"><i
+                            class="fa-solid fa-plus"></i></button>
+                    <button class="btn-zoom" id="btn-zoom-out" title="Zoom Out Chart"><i
+                            class="fa-solid fa-minus"></i></button>
+                    <button class="btn-zoom" id="btn-zoom-reset" title="Reset View & Pan"><i
+                            class="fa-solid fa-rotate-left"></i></button>
+                    <button class="btn-zoom" id="btn-fullscreen" title="Toggle Fullscreen Chart"><i
+                            class="fa-solid fa-expand"></i></button>
                 </div>
             </div>
 
@@ -349,10 +455,12 @@
                     </div>
                     <div class="explanation-body">
                         <div class="explanation-meta">
-                            <span class="explanation-title"><i class="fa-solid fa-shield-halved"></i> EXPLAINABLE INSTITUTIONAL AI REASONING ENGINE</span>
+                            <span class="explanation-title"><i class="fa-solid fa-shield-halved"></i> EXPLAINABLE
+                                INSTITUTIONAL AI REASONING ENGINE</span>
                             <span class="badge-decision-hold" id="ai-decision-badge">HOLD</span>
                         </div>
-                        <p class="explanation-summary" id="ai-explanation-summary">Analyzing live market structure, higher timeframe trends, and technical indicators...</p>
+                        <p class="explanation-summary" id="ai-explanation-summary">Analyzing live market structure,
+                            higher timeframe trends, and technical indicators...</p>
                         <div class="explanation-chips" id="ai-outweighing-chips"></div>
                     </div>
                 </div>
@@ -364,16 +472,17 @@
                             <h3><i class="fa-solid fa-square-poll-vertical"></i> Heuristic Strategy Model Score</h3>
                             <span class="badge-score" id="ai-confidence-badge">78.5% SCORE</span>
                         </div>
-                        
+
                         <div class="probability-bars">
                             <div class="prob-row">
                                 <span class="prob-lbl text-emerald">BUY Score</span>
                                 <div class="progress-bar-bg">
-                                    <div class="progress-bar-fill bg-emerald" id="prob-buy-fill" style="width: 68%;"></div>
+                                    <div class="progress-bar-fill bg-emerald" id="prob-buy-fill" style="width: 68%;">
+                                    </div>
                                 </div>
                                 <span class="prob-pct" id="prob-buy-pct">68.0%</span>
                             </div>
-                            
+
                             <div class="prob-row">
                                 <span class="prob-lbl text-red">SELL Score</span>
                                 <div class="progress-bar-bg">
@@ -405,27 +514,37 @@
                         <div class="pillars-list">
                             <div class="pillar-item">
                                 <span>1. Trend Alignment (25%)</span>
-                                <div class="pillar-bar"><div class="fill" id="pil-trend" style="width: 100%;"></div></div>
+                                <div class="pillar-bar">
+                                    <div class="fill" id="pil-trend" style="width: 100%;"></div>
+                                </div>
                                 <strong id="val-trend">100%</strong>
                             </div>
                             <div class="pillar-item">
                                 <span>2. Market Structure (25%)</span>
-                                <div class="pillar-bar"><div class="fill" id="pil-struct" style="width: 75%;"></div></div>
+                                <div class="pillar-bar">
+                                    <div class="fill" id="pil-struct" style="width: 75%;"></div>
+                                </div>
                                 <strong id="val-struct">75%</strong>
                             </div>
                             <div class="pillar-item">
                                 <span>3. Momentum & Volume (20%)</span>
-                                <div class="pillar-bar"><div class="fill" id="pil-mom" style="width: 90%;"></div></div>
+                                <div class="pillar-bar">
+                                    <div class="fill" id="pil-mom" style="width: 90%;"></div>
+                                </div>
                                 <strong id="val-mom">90%</strong>
                             </div>
                             <div class="pillar-item">
                                 <span>4. Heuristic Model Score (20%)</span>
-                                <div class="pillar-bar"><div class="fill" id="pil-ai" style="width: 78%;"></div></div>
+                                <div class="pillar-bar">
+                                    <div class="fill" id="pil-ai" style="width: 78%;"></div>
+                                </div>
                                 <strong id="val-ai">78%</strong>
                             </div>
                             <div class="pillar-item">
                                 <span>5. Risk & News Filter (10%)</span>
-                                <div class="pillar-bar"><div class="fill" id="pil-risk" style="width: 100%;"></div></div>
+                                <div class="pillar-bar">
+                                    <div class="fill" id="pil-risk" style="width: 100%;"></div>
+                                </div>
                                 <strong id="val-risk">100%</strong>
                             </div>
                         </div>
@@ -436,9 +555,12 @@
             <!-- Positions, Pending Orders, History & Audit Log Drawer -->
             <div class="bottom-drawer">
                 <div class="drawer-tabs">
-                    <button class="tab-btn active" data-tab="tab-positions">Active Positions (<span id="count-pos">0</span>)</button>
-                    <button class="tab-btn" data-tab="tab-pending">Pending Orders (<span id="count-pending">0</span>)</button>
-                    <button class="tab-btn" data-tab="tab-history">Trade History (<span id="count-history">0</span>)</button>
+                    <button class="tab-btn active" data-tab="tab-positions">Active Positions (<span
+                            id="count-pos">0</span>)</button>
+                    <button class="tab-btn" data-tab="tab-pending">Pending Orders (<span
+                            id="count-pending">0</span>)</button>
+                    <button class="tab-btn" data-tab="tab-history">Trade History (<span
+                            id="count-history">0</span>)</button>
                     <button class="tab-btn" data-tab="tab-ml-models">AI Models & Training</button>
                     <button class="tab-btn" data-tab="tab-explain">AI Strategy Audit Log</button>
                 </div>
@@ -447,7 +569,8 @@
                 <div class="tab-content" id="tab-positions">
                     <div class="table-actions-header">
                         <span class="sub-text">Live synchronized positions in connected MT5 Account</span>
-                        <button class="btn btn-sm btn-outline text-red" id="btn-close-all-pos"><i class="fa-solid fa-ban"></i> Close All Positions</button>
+                        <button class="btn btn-sm btn-outline text-red" id="btn-close-all-pos"><i
+                                class="fa-solid fa-ban"></i> Close All Positions</button>
                     </div>
                     <table class="data-table">
                         <thead>
@@ -499,12 +622,18 @@
 
                 <!-- Tab 3: Trade History -->
                 <div class="tab-content hidden" id="tab-history">
-                    <div class="table-actions-header" style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: rgba(15, 23, 42, 0.6); border-bottom: 1px solid rgba(255, 255, 255, 0.05); font-size: 0.82rem;">
-                        <span class="sub-text" id="history-showing-text" style="color: var(--text-muted, #94a3b8); font-weight: 500;">Showing 0 of 0</span>
-                        <div class="pagination-controls" id="history-pagination-controls" style="display: flex; gap: 8px; align-items: center;">
-                            <button class="btn btn-sm btn-outline" id="btn-history-prev" onclick="changeHistoryPage(-1)" disabled><i class="fa-solid fa-chevron-left"></i> Previous</button>
-                            <span id="history-page-indicator" style="color: #fff; font-weight: 600; padding: 0 6px;">Page 1 of 1</span>
-                            <button class="btn btn-sm btn-outline" id="btn-history-next" onclick="changeHistoryPage(1)" disabled>Next <i class="fa-solid fa-chevron-right"></i></button>
+                    <div class="table-actions-header"
+                        style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: rgba(15, 23, 42, 0.6); border-bottom: 1px solid rgba(255, 255, 255, 0.05); font-size: 0.82rem;">
+                        <span class="sub-text" id="history-showing-text"
+                            style="color: var(--text-muted, #94a3b8); font-weight: 500;">Showing 0 of 0</span>
+                        <div class="pagination-controls" id="history-pagination-controls"
+                            style="display: flex; gap: 8px; align-items: center;">
+                            <button class="btn btn-sm btn-outline" id="btn-history-prev" onclick="changeHistoryPage(-1)"
+                                disabled><i class="fa-solid fa-chevron-left"></i> Previous</button>
+                            <span id="history-page-indicator"
+                                style="color: #fff; font-weight: 600; padding: 0 6px;">Page 1 of 1</span>
+                            <button class="btn btn-sm btn-outline" id="btn-history-next" onclick="changeHistoryPage(1)"
+                                disabled>Next <i class="fa-solid fa-chevron-right"></i></button>
                         </div>
                     </div>
                     <table class="data-table">
@@ -538,7 +667,8 @@
                     <div class="audit-log-container" id="audit-log-content">
                         <div class="log-entry">
                             <span class="log-time">[00:00:00]</span>
-                            <span class="log-msg text-emerald">[SYSTEM] ApexTrader AI Trading Terminal Initializing...</span>
+                            <span class="log-msg text-emerald">[SYSTEM] ApexTrader AI Trading Terminal
+                                Initializing...</span>
                         </div>
                     </div>
                 </div>
@@ -546,14 +676,20 @@
                 <!-- Tab 5: AI Models & Training -->
                 <div class="tab-content hidden" id="tab-ml-models">
                     <div class="table-actions-header">
-                        <span class="sub-text">Manage versioned machine learning models (XGBoost/LightGBM) & trigger walk-forward training</span>
+                        <span class="sub-text">Manage versioned machine learning models (XGBoost/LightGBM) & trigger
+                            walk-forward training</span>
                         <div class="ml-controls">
-                            <input type="text" id="ml-train-version" class="form-control form-control-sm" style="display:inline-block; width:180px; margin-right:8px; height: 30px; background: #1c2730; color: #fff; border: 1px solid #2d3d4a;" placeholder="Model Version (optional)...">
-                            <button class="btn btn-sm btn-emerald" id="btn-ml-train"><i class="fa-solid fa-graduation-cap"></i> Train New Model</button>
+                            <input type="text" id="ml-train-version" class="form-control form-control-sm"
+                                style="display:inline-block; width:180px; margin-right:8px; height: 30px; background: #1c2730; color: #fff; border: 1px solid #2d3d4a;"
+                                placeholder="Model Version (optional)...">
+                            <button class="btn btn-sm btn-emerald" id="btn-ml-train"><i
+                                    class="fa-solid fa-graduation-cap"></i> Train New Model</button>
                         </div>
                     </div>
-                    <div id="ml-training-status" class="ml-status-alert hidden" style="background: #192734; border: 1px solid #1ba1f2; color: #1ba1f2; padding: 10px; margin-bottom: 12px; border-radius: 4px;">
-                        <i class="fa-solid fa-spinner fa-spin"></i> Walk-forward model training in progress. This may take a moment...
+                    <div id="ml-training-status" class="ml-status-alert hidden"
+                        style="background: #192734; border: 1px solid #1ba1f2; color: #1ba1f2; padding: 10px; margin-bottom: 12px; border-radius: 4px;">
+                        <i class="fa-solid fa-spinner fa-spin"></i> Walk-forward model training in progress. This may
+                        take a moment...
                     </div>
                     <table class="data-table">
                         <thead>
@@ -591,9 +727,12 @@
 
             <!-- Modal Sub-Tabs -->
             <div class="modal-subtabs">
-                <button class="modal-tab-btn active" data-modaltab="mt5-tab-connect"><i class="fa-solid fa-plug"></i> Verified Connection</button>
-                <button class="modal-tab-btn" data-modaltab="mt5-tab-saved"><i class="fa-solid fa-bookmark"></i> Saved Accounts</button>
-                <button class="modal-tab-btn" data-modaltab="mt5-tab-history"><i class="fa-solid fa-list-check"></i> Login History</button>
+                <button class="modal-tab-btn active" data-modaltab="mt5-tab-connect"><i class="fa-solid fa-plug"></i>
+                    Verified Connection</button>
+                <button class="modal-tab-btn" data-modaltab="mt5-tab-saved"><i class="fa-solid fa-bookmark"></i> Saved
+                    Accounts</button>
+                <button class="modal-tab-btn" data-modaltab="mt5-tab-history"><i class="fa-solid fa-list-check"></i>
+                    Login History</button>
             </div>
 
             <div class="modal-body">
@@ -604,15 +743,18 @@
                         <div class="grid-2col">
                             <div class="control-group">
                                 <label>MT5 Login ID</label>
-                                <input type="number" id="mt5-input-login" class="form-control" placeholder="110690124" required>
+                                <input type="number" id="mt5-input-login" class="form-control" placeholder="110690124"
+                                    required>
                             </div>
-                            
+
                             <!-- Password Input with Eye Icon Toggle -->
                             <div class="control-group">
                                 <label>MT5 Password</label>
                                 <div class="password-input-wrapper">
-                                    <input type="password" id="mt5-input-password" class="form-control" placeholder="••••••••" autocomplete="current-password" required>
-                                    <button type="button" class="btn-toggle-eye" id="btn-toggle-password-vis" title="Toggle Show/Hide Password">
+                                    <input type="password" id="mt5-input-password" class="form-control"
+                                        placeholder="••••••••" autocomplete="current-password" required>
+                                    <button type="button" class="btn-toggle-eye" id="btn-toggle-password-vis"
+                                        title="Toggle Show/Hide Password">
                                         <i class="fa-solid fa-eye" id="icon-password-eye"></i>
                                     </button>
                                 </div>
@@ -621,12 +763,15 @@
 
                         <div class="control-group">
                             <label>Broker / Server Name</label>
-                            <input type="text" id="mt5-input-server" class="form-control" placeholder="MetaQuotes-Demo" required>
+                            <input type="text" id="mt5-input-server" class="form-control" placeholder="MetaQuotes-Demo"
+                                required>
                         </div>
 
                         <div class="control-group">
-                            <label>MT5 Terminal Path (Optional — e.g. C:\Program Files\MetaTrader 5\terminal64.exe)</label>
-                            <input type="text" id="mt5-input-terminal-path" class="form-control" placeholder="Auto-detect or enter path to terminal64.exe">
+                            <label>MT5 Terminal Path (Optional — e.g. C:\Program Files\MetaTrader
+                                5\terminal64.exe)</label>
+                            <input type="text" id="mt5-input-terminal-path" class="form-control"
+                                placeholder="Auto-detect or enter path to terminal64.exe">
                         </div>
 
                         <!-- Action Row: Step 2 Fetch Account & Step 3 Connect Account -->
@@ -647,58 +792,83 @@
                             <strong id="error-title">Account Connection Failed</strong>
                         </div>
                         <p class="error-msg" id="error-detail-reason">Invalid Password or Login.</p>
-                        
+
                         <!-- Detailed Diagnostics Panel (Part 7) -->
-                        <div class="diagnostics-panel margin-top-sm" id="mt5-diagnostics-panel" style="display: none; background: rgba(0,0,0,0.15); padding: 10px; border-radius: var(--radius-sm); border: 1px solid var(--border);">
-                            <h5 class="section-title" style="margin-bottom: 8px; font-size: 11px; text-transform: uppercase; color: var(--accent-cyan); display: flex; align-items: center; gap: 6px;">
+                        <div class="diagnostics-panel margin-top-sm" id="mt5-diagnostics-panel"
+                            style="display: none; background: rgba(0,0,0,0.15); padding: 10px; border-radius: var(--radius-sm); border: 1px solid var(--border);">
+                            <h5 class="section-title"
+                                style="margin-bottom: 8px; font-size: 11px; text-transform: uppercase; color: var(--accent-cyan); display: flex; align-items: center; gap: 6px;">
                                 <i class="fa-solid fa-circle-info"></i> Detailed Diagnostics
                             </h5>
-                            <div class="diagnostics-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 11px; font-family: var(--font-mono);">
-                                <div class="diag-item" style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:3px;">
+                            <div class="diagnostics-grid"
+                                style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 11px; font-family: var(--font-mono);">
+                                <div class="diag-item"
+                                    style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:3px;">
                                     <span style="color:var(--text-secondary);">Terminal Path:</span>
-                                    <strong id="diag-terminal-path" style="text-overflow:ellipsis; overflow:hidden; white-space:nowrap; max-width:140px;" title="Path">-</strong>
+                                    <strong id="diag-terminal-path"
+                                        style="text-overflow:ellipsis; overflow:hidden; white-space:nowrap; max-width:140px;"
+                                        title="Path">-</strong>
                                 </div>
-                                <div class="diag-item" style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:3px;">
+                                <div class="diag-item"
+                                    style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:3px;">
                                     <span style="color:var(--text-secondary);">Terminal Exists:</span>
                                     <strong id="diag-terminal-exists">-</strong>
                                 </div>
-                                <div class="diag-item" style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:3px;">
+                                <div class="diag-item"
+                                    style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:3px;">
                                     <span style="color:var(--text-secondary);">MT5 Initialize:</span>
                                     <strong id="diag-initialize">-</strong>
                                 </div>
-                                <div class="diag-item" style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:3px;">
+                                <div class="diag-item"
+                                    style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:3px;">
                                     <span style="color:var(--text-secondary);">Init Error:</span>
-                                    <strong id="diag-initialize-error" class="text-red" style="text-overflow:ellipsis; overflow:hidden; white-space:nowrap; max-width:140px;" title="Init Error">-</strong>
+                                    <strong id="diag-initialize-error" class="text-red"
+                                        style="text-overflow:ellipsis; overflow:hidden; white-space:nowrap; max-width:140px;"
+                                        title="Init Error">-</strong>
                                 </div>
-                                <div class="diag-item" style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:3px;">
+                                <div class="diag-item"
+                                    style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:3px;">
                                     <span style="color:var(--text-secondary);">Login:</span>
                                     <strong id="diag-login">-</strong>
                                 </div>
-                                <div class="diag-item" style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:3px;">
+                                <div class="diag-item"
+                                    style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:3px;">
                                     <span style="color:var(--text-secondary);">Login Error:</span>
-                                    <strong id="diag-login-error" class="text-red" style="text-overflow:ellipsis; overflow:hidden; white-space:nowrap; max-width:140px;" title="Login Error">-</strong>
+                                    <strong id="diag-login-error" class="text-red"
+                                        style="text-overflow:ellipsis; overflow:hidden; white-space:nowrap; max-width:140px;"
+                                        title="Login Error">-</strong>
                                 </div>
-                                <div class="diag-item" style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:3px;">
+                                <div class="diag-item"
+                                    style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:3px;">
                                     <span style="color:var(--text-secondary);">Req Account:</span>
                                     <strong id="diag-req-account">-</strong>
                                 </div>
-                                <div class="diag-item" style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:3px;">
+                                <div class="diag-item"
+                                    style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:3px;">
                                     <span style="color:var(--text-secondary);">Conn Account:</span>
                                     <strong id="diag-conn-account">-</strong>
                                 </div>
-                                <div class="diag-item" style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:3px;">
+                                <div class="diag-item"
+                                    style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:3px;">
                                     <span style="color:var(--text-secondary);">Req Server:</span>
-                                    <strong id="diag-req-server" style="text-overflow:ellipsis; overflow:hidden; white-space:nowrap; max-width:140px;" title="Req Server">-</strong>
+                                    <strong id="diag-req-server"
+                                        style="text-overflow:ellipsis; overflow:hidden; white-space:nowrap; max-width:140px;"
+                                        title="Req Server">-</strong>
                                 </div>
-                                <div class="diag-item" style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:3px;">
+                                <div class="diag-item"
+                                    style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:3px;">
                                     <span style="color:var(--text-secondary);">Conn Server:</span>
-                                    <strong id="diag-conn-server" style="text-overflow:ellipsis; overflow:hidden; white-space:nowrap; max-width:140px;" title="Conn Server">-</strong>
+                                    <strong id="diag-conn-server"
+                                        style="text-overflow:ellipsis; overflow:hidden; white-space:nowrap; max-width:140px;"
+                                        title="Conn Server">-</strong>
                                 </div>
-                                <div class="diag-item" style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:3px;">
+                                <div class="diag-item"
+                                    style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:3px;">
                                     <span style="color:var(--text-secondary);">Account Info:</span>
                                     <strong id="diag-account-info">-</strong>
                                 </div>
-                                <div class="diag-item" style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:3px;">
+                                <div class="diag-item"
+                                    style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:3px;">
                                     <span style="color:var(--text-secondary);">Final Status:</span>
                                     <strong id="diag-final-status" class="text-red">-</strong>
                                 </div>
@@ -717,21 +887,28 @@
                             <div class="prev-item"><span>Account Name:</span> <strong id="prev-name">-</strong></div>
                             <div class="prev-item"><span>Broker:</span> <strong id="prev-broker">-</strong></div>
                             <div class="prev-item"><span>Server:</span> <strong id="prev-server">-</strong></div>
-                            <div class="prev-item"><span>Account Type:</span> <strong id="prev-type" class="text-cyan">-</strong></div>
+                            <div class="prev-item"><span>Account Type:</span> <strong id="prev-type"
+                                    class="text-cyan">-</strong></div>
                             <div class="prev-item"><span>Currency:</span> <strong id="prev-currency">-</strong></div>
                             <div class="prev-item"><span>Leverage:</span> <strong id="prev-leverage">-</strong></div>
-                            <div class="prev-item"><span>Balance:</span> <strong id="prev-balance" class="text-emerald">$0.00</strong></div>
-                            <div class="prev-item"><span>Equity:</span> <strong id="prev-equity" class="text-cyan">$0.00</strong></div>
-                            <div class="prev-item"><span>Free Margin:</span> <strong id="prev-freemargin">$0.00</strong></div>
+                            <div class="prev-item"><span>Balance:</span> <strong id="prev-balance"
+                                    class="text-emerald">$0.00</strong></div>
+                            <div class="prev-item"><span>Equity:</span> <strong id="prev-equity"
+                                    class="text-cyan">$0.00</strong></div>
+                            <div class="prev-item"><span>Free Margin:</span> <strong id="prev-freemargin">$0.00</strong>
+                            </div>
                             <div class="prev-item"><span>Margin:</span> <strong id="prev-margin">$0.00</strong></div>
-                            <div class="prev-item"><span>Margin Level:</span> <strong id="prev-marginlevel" class="text-amber">0.0%</strong></div>
+                            <div class="prev-item"><span>Margin Level:</span> <strong id="prev-marginlevel"
+                                    class="text-amber">0.0%</strong></div>
                             <div class="prev-item"><span>Company:</span> <strong id="prev-company">-</strong></div>
-                            <div class="prev-item"><span>Terminal Version:</span> <strong id="prev-build">-</strong></div>
+                            <div class="prev-item"><span>Terminal Version:</span> <strong id="prev-build">-</strong>
+                            </div>
                         </div>
                     </div>
 
                     <div class="mt5-status-log-box margin-top-sm" id="mt5-connection-log">
-                        <div class="log-entry"><span class="log-time">[MT5]</span> Enter credentials and click 'Fetch Account Preview' to verify...</div>
+                        <div class="log-entry"><span class="log-time">[MT5]</span> Enter credentials and click 'Fetch
+                            Account Preview' to verify...</div>
                     </div>
 
                     <div class="margin-top-sm text-right">
@@ -787,18 +964,22 @@
                             <label>AI Trading Strategy Profile</label>
                             <select id="cfg-trading-mode" class="form-control">
                                 <option value="CONSERVATIVE">CONSERVATIVE (78%+ Confidence, 1:2.5+ Risk/Reward)</option>
-                                <option value="BALANCED" selected>BALANCED (72%+ Confidence, 1:2.0+ Risk/Reward)</option>
+                                <option value="BALANCED" selected>BALANCED (72%+ Confidence, 1:2.0+ Risk/Reward)
+                                </option>
                                 <option value="AGGRESSIVE">AGGRESSIVE (65%+ Confidence, 1:1.5+ Risk/Reward)</option>
                             </select>
                         </div>
                         <div class="control-group" data-risk-field="cfg-strategy-profile">
                             <label>Gold Engine Execution Strategy</label>
                             <select id="cfg-strategy-profile" class="form-control">
-                                <option value="HYBRID_AUTO" selected>HYBRID AUTO (Dark Venus BB + Institutional Engine)</option>
+                                <option value="HYBRID_AUTO" selected>HYBRID AUTO (Dark Venus BB + Institutional Engine)
+                                </option>
                                 <option value="BB_MEAN_REVERSION">BB MEAN REVERSION (Dark Venus Band Reversion)</option>
-                                <option value="BB_TREND_FOLLOWING">BB TREND FOLLOWING (Band Continuation & Central Cross)</option>
+                                <option value="BB_TREND_FOLLOWING">BB TREND FOLLOWING (Band Continuation & Central
+                                    Cross)</option>
                                 <option value="BB_BREAKOUT">BB BREAKOUT (Band & Squeeze Expansion Breakout)</option>
-                                <option value="INSTITUTIONAL_ONLY">INSTITUTIONAL ONLY (Structure, Sweeps & Order Blocks)</option>
+                                <option value="INSTITUTIONAL_ONLY">INSTITUTIONAL ONLY (Structure, Sweeps & Order Blocks)
+                                </option>
                             </select>
                         </div>
                     </div>
@@ -807,17 +988,28 @@
                         <div class="control-group" data-risk-field="cfg-signal-mode">
                             <label>Signal Evaluation Mode</label>
                             <select id="cfg-signal-mode" class="form-control">
-                                <option value="CLOSED_CANDLE" selected>CLOSED CANDLE (Safer — Confirmed Candle Execution)</option>
+                                <option value="CLOSED_CANDLE" selected>CLOSED CANDLE (Safer — Confirmed Candle
+                                    Execution)</option>
                                 <option value="CURRENT_CANDLE">CURRENT CANDLE (Fast — Real-Time Forming Candle)</option>
                             </select>
                         </div>
                         <div class="control-group" data-risk-field="cfg-lot-mode">
                             <label>Position Sizing Mode</label>
                             <select id="cfg-lot-mode" class="form-control">
-                                <option value="FIXED" selected>FIXED LOT (User Specified Volume)</option>
-                                <option value="DYNAMIC_RISK">DYNAMIC RISK (Risk % & SL Distance Sizing)</option>
+                                <option value="DYNAMIC_RISK" selected>DYNAMIC RISK (Risk % & SL Distance Sizing)</option>
+                                <option value="FIXED">FIXED LOT (User Specified Volume)</option>
                             </select>
                         </div>
+                    </div>
+
+                    <div class="control-group margin-top-sm" data-risk-field="cfg-entry-confirmation-mode">
+                        <label>Entry Confirmation Mechanism</label>
+                        <select id="cfg-entry-confirmation-mode" class="form-control">
+                            <option value="IMMEDIATE" selected>IMMEDIATE (Execute immediately on signal — Default)
+                            </option>
+                            <option value="CONFIRM_NEXT_CANDLE">CONFIRM NEXT CANDLE (Wait for next candle close
+                                confirmation)</option>
+                        </select>
                     </div>
 
                     <div class="grid-2col margin-top-sm">
@@ -834,11 +1026,11 @@
                     <div class="grid-2col margin-top-sm">
                         <div class="control-group" data-risk-field="cfg-user-lot">
                             <label>Fixed Lot Size (Lots)</label>
-                            <input type="number" step="0.01" id="cfg-user-lot" class="form-control" value="0.10">
+                            <input type="number" step="0.01" id="cfg-user-lot" class="form-control" value="0.01">
                         </div>
                         <div class="control-group" data-risk-field="cfg-max-allowed-lot">
                             <label>Maximum Allowed Lot Cap</label>
-                            <input type="number" step="0.05" id="cfg-max-allowed-lot" class="form-control" value="1.00">
+                            <input type="number" step="0.01" id="cfg-max-allowed-lot" class="form-control" value="1.00">
                         </div>
                     </div>
 
@@ -861,21 +1053,25 @@
                     <div class="grid-2col">
                         <div class="control-group" data-risk-field="cfg-daily-loss">
                             <label>Daily Loss Circuit Breaker (%)</label>
-                            <input type="number" step="0.5" id="cfg-daily-loss" class="form-control" value="3.0">
+                            <input type="number" step="0.1" id="cfg-daily-loss" class="form-control" value="3.0">
                         </div>
                         <div class="control-group" data-risk-field="cfg-max-daily-loss-amt">
                             <label>Max Daily Loss Amount ($)</label>
-                            <input type="number" step="50" id="cfg-max-daily-loss-amt" class="form-control" value="500">
+                            <input type="number" step="any" min="0" id="cfg-max-daily-loss-amt" class="form-control"
+                                value="500">
                         </div>
                     </div>
 
                     <div class="grid-2col margin-top-sm">
                         <div class="control-group" data-risk-field="cfg-weekly-loss">
                             <label>Weekly Loss Circuit Breaker (%)</label>
-                            <input type="number" step="0.5" min="0.1" max="100.0" id="cfg-weekly-loss" class="form-control" value="7.0">
+                            <input type="number" step="0.1" min="0.1" max="100.0" id="cfg-weekly-loss"
+                                class="form-control" value="7.0">
                         </div>
-                        <div class="control-group" style="display: flex; flex-direction: column; justify-content: flex-end;">
-                            <button type="button" class="btn btn-amber btn-block" id="btn-reset-weekly-loss" title="Manually clear current weekly trading lock and reset weekly loss counter for testing session">
+                        <div class="control-group"
+                            style="display: flex; flex-direction: column; justify-content: flex-end;">
+                            <button type="button" class="btn btn-amber btn-block" id="btn-reset-weekly-loss"
+                                title="Manually clear current weekly trading lock and reset weekly loss counter for testing session">
                                 <i class="fa-solid fa-rotate-left"></i> Reset Weekly Loss Lock
                             </button>
                         </div>
@@ -888,7 +1084,7 @@
                         </div>
                         <div class="control-group" data-risk-field="cfg-default-lot">
                             <label>Default / Fallback Lot Size</label>
-                            <input type="number" step="0.01" id="cfg-default-lot" class="form-control" value="0.10">
+                            <input type="number" step="0.01" id="cfg-default-lot" class="form-control" value="0.01">
                         </div>
                     </div>
 
@@ -916,18 +1112,21 @@
                         </div>
                         <div class="control-group" data-risk-field="cfg-min-confidence">
                             <label>Min AI Confidence Score</label>
-                            <input type="number" step="0.05" min="0.50" max="0.95" id="cfg-min-confidence" class="form-control" value="0.70">
+                            <input type="number" step="0.05" min="0.50" max="0.95" id="cfg-min-confidence"
+                                class="form-control" value="0.70">
                         </div>
                     </div>
 
                     <div class="grid-2col margin-top-sm">
                         <div class="control-group" data-risk-field="cfg-trailing-activation-rr">
                             <label>Trailing Activation (R:R Ratio)</label>
-                            <input type="number" step="0.1" min="0.5" max="5.0" id="cfg-trailing-activation-rr" class="form-control" value="1.2">
+                            <input type="number" step="0.1" min="0.5" max="5.0" id="cfg-trailing-activation-rr"
+                                class="form-control" value="1.2">
                         </div>
                         <div class="control-group" data-risk-field="cfg-trailing-atr-mult">
                             <label>Dynamic ATR Trailing Multiplier</label>
-                            <input type="number" step="0.1" min="0.5" max="5.0" id="cfg-trailing-atr-mult" class="form-control" value="2.0">
+                            <input type="number" step="0.1" min="0.5" max="5.0" id="cfg-trailing-atr-mult"
+                                class="form-control" value="2.0">
                         </div>
                     </div>
 
@@ -941,18 +1140,21 @@
                         </div>
                         <div class="control-group" data-risk-field="cfg-auto-cooldown">
                             <label>Auto-Trade Cooldown (Seconds)</label>
-                            <input type="number" step="5" min="0" max="3600" id="cfg-auto-cooldown" class="form-control" value="300">
+                            <input type="number" step="5" min="0" max="3600" id="cfg-auto-cooldown" class="form-control"
+                                value="300">
                         </div>
                     </div>
 
                     <div class="grid-2col margin-top-sm">
                         <div class="control-group" data-risk-field="cfg-max-spread">
                             <label>Max Allowed Spread (Pips)</label>
-                            <input type="number" step="0.1" min="0.1" max="20.0" id="cfg-max-spread" class="form-control" value="2.5">
+                            <input type="number" step="0.1" min="0.1" max="20.0" id="cfg-max-spread"
+                                class="form-control" value="2.5">
                         </div>
                         <div class="control-group" data-risk-field="cfg-max-consecutive-losses">
                             <label>Max Consecutive Loss Limit</label>
-                            <input type="number" step="1" min="1" max="20" id="cfg-max-consecutive-losses" class="form-control" value="5">
+                            <input type="number" step="1" min="1" max="20" id="cfg-max-consecutive-losses"
+                                class="form-control" value="5">
                         </div>
                     </div>
 
@@ -974,7 +1176,9 @@
                         <button type="submit" class="btn btn-cyan" style="flex: 2;">
                             <i class="fa-solid fa-floppy-disk"></i> Save Risk Settings
                         </button>
-                        <button type="button" class="btn btn-amber" id="btn-reset-testing-risk-baseline" style="flex: 1;" title="Reset testing session circuit breaker baselines (Daily Loss, Weekly Loss, Drawdown Peak, Consec Losses)">
+                        <button type="button" class="btn btn-amber" id="btn-reset-testing-risk-baseline"
+                            style="flex: 1;"
+                            title="Reset testing session circuit breaker baselines (Daily Loss, Weekly Loss, Drawdown Peak, Consec Losses)">
                             <i class="fa-solid fa-rotate-left"></i> Reset Testing Baseline
                         </button>
                     </div>
@@ -985,104 +1189,141 @@
 
     <!-- Pakistan Standard Time (PKT) Timetable Modal -->
     <div class="modal-overlay hidden" id="modal-pkt-schedule">
-        <div class="modal-card modal-md" style="max-width: 620px; background: rgba(15, 23, 42, 0.96); backdrop-filter: blur(16px); border: 1px solid rgba(56, 189, 248, 0.3); box-shadow: 0 20px 50px rgba(0,0,0,0.6);">
-            <div class="modal-header" style="border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 12px; display: flex; align-items: center; justify-content: space-between;">
+        <div class="modal-card modal-md"
+            style="max-width: 620px; background: rgba(15, 23, 42, 0.96); backdrop-filter: blur(16px); border: 1px solid rgba(56, 189, 248, 0.3); box-shadow: 0 20px 50px rgba(0,0,0,0.6);">
+            <div class="modal-header"
+                style="border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 12px; display: flex; align-items: center; justify-content: space-between;">
                 <div style="display: flex; align-items: center; gap: 10px;">
-                    <div style="width: 36px; height: 36px; border-radius: 8px; background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.3); display: flex; align-items: center; justify-content: center; color: #f59e0b; font-size: 18px;">
+                    <div
+                        style="width: 36px; height: 36px; border-radius: 8px; background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.3); display: flex; align-items: center; justify-content: center; color: #f59e0b; font-size: 18px;">
                         <i class="fa-solid fa-clock"></i>
                     </div>
                     <div>
-                        <h2 style="font-size: 16px; font-weight: 700; margin: 0; color: #f8fafc;">Pakistan Trading Timetable (PKT)</h2>
-                        <span style="font-size: 11px; color: #94a3b8;">UTC+5 Local Pakistan Standard Time Trading Window Guide</span>
+                        <h2 style="font-size: 16px; font-weight: 700; margin: 0; color: #f8fafc;">Pakistan Trading
+                            Timetable (PKT)</h2>
+                        <span style="font-size: 11px; color: #94a3b8;">UTC+5 Local Pakistan Standard Time Trading Window
+                            Guide</span>
                     </div>
                 </div>
                 <div style="display: flex; align-items: center; gap: 12px;">
-                    <span class="badge" id="live-pkt-clock" style="background: rgba(16, 185, 129, 0.15); color: var(--accent-emerald); border: 1px solid var(--accent-emerald); font-family: var(--font-mono); font-size: 12px; padding: 5px 10px; font-weight: 700;">
+                    <span class="badge" id="live-pkt-clock"
+                        style="background: rgba(16, 185, 129, 0.15); color: var(--accent-emerald); border: 1px solid var(--accent-emerald); font-family: var(--font-mono); font-size: 12px; padding: 5px 10px; font-weight: 700;">
                         PKT: --:--:--
                     </span>
-                    <button class="btn-close-modal" id="btn-close-pkt-schedule" style="font-size: 24px; color: #94a3b8; background: transparent; border: none; cursor: pointer;">&times;</button>
+                    <button class="btn-close-modal" id="btn-close-pkt-schedule"
+                        style="font-size: 24px; color: #94a3b8; background: transparent; border: none; cursor: pointer;">&times;</button>
                 </div>
             </div>
-            
+
             <div class="modal-body" style="padding-top: 16px;">
                 <!-- Current Session Live Status Banner -->
-                <div id="pkt-current-session-banner" style="background: linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(15, 23, 42, 0.8)); border: 1px solid #f59e0b; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between;">
+                <div id="pkt-current-session-banner"
+                    style="background: linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(15, 23, 42, 0.8)); border: 1px solid #f59e0b; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between;">
                     <div>
-                        <span style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;">Active Market State (PKT)</span>
-                        <h4 id="pkt-active-session-title" style="font-size: 15px; font-weight: 800; color: #f59e0b; margin: 2px 0 0 0;">🔥 GOLDEN WINDOW ACTIVE (London & NY Overlap)</h4>
+                        <span
+                            style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;">Active
+                            Market State (PKT)</span>
+                        <h4 id="pkt-active-session-title"
+                            style="font-size: 15px; font-weight: 800; color: #f59e0b; margin: 2px 0 0 0;">🔥 GOLDEN
+                            WINDOW ACTIVE (London & NY Overlap)</h4>
                     </div>
-                    <span class="badge" id="pkt-active-session-badge" style="background: #f59e0b; color: #0f172a; font-weight: 800; font-size: 11px; padding: 5px 12px; border-radius: 20px;">
+                    <span class="badge" id="pkt-active-session-badge"
+                        style="background: #f59e0b; color: #0f172a; font-weight: 800; font-size: 11px; padding: 5px 12px; border-radius: 20px;">
                         OPTIMAL SCALPING NOW
                     </span>
                 </div>
 
                 <!-- Timetable Schedule Cards Grid -->
                 <div style="display: flex; flex-direction: column; gap: 10px;" id="pkt-schedule-cards">
-                    
+
                     <!-- 1. GOLDEN WINDOW -->
-                    <div class="pkt-card" id="pkt-card-golden" style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 8px; padding: 12px 16px; transition: all 0.3s ease;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                            <span style="font-size: 14px; font-weight: 700; color: #f59e0b; display: flex; align-items: center; gap: 6px;">
+                    <div class="pkt-card" id="pkt-card-golden"
+                        style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 8px; padding: 12px 16px; transition: all 0.3s ease;">
+                        <div
+                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                            <span
+                                style="font-size: 14px; font-weight: 700; color: #f59e0b; display: flex; align-items: center; gap: 6px;">
                                 <i class="fa-solid fa-fire"></i> 5:00 PM – 9:00 PM PKT
                             </span>
-                            <span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid #f59e0b; font-size: 10px; font-weight: 800;">
+                            <span class="badge"
+                                style="background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid #f59e0b; font-size: 10px; font-weight: 800;">
                                 🔥 BEST (10/10) — GOLDEN OVERLAP
                             </span>
                         </div>
-                        <p style="font-size: 12px; color: #cbd5e1; margin: 0 0 6px 0;">London & New York Overlap | Peak Volume & Tightest Gold Spreads (&lt;1.5 pips)</p>
+                        <p style="font-size: 12px; color: #cbd5e1; margin: 0 0 6px 0;">London & New York Overlap | Peak
+                            Volume & Tightest Gold Spreads (&lt;1.5 pips)</p>
                         <div style="font-size: 11px; color: #94a3b8; display: flex; gap: 14px;">
-                            <span><b>Recommended Profile:</b> <code style="color: var(--accent-cyan);">HYBRID_AUTO</code></span>
+                            <span><b>Recommended Profile:</b> <code
+                                    style="color: var(--accent-cyan);">HYBRID_AUTO</code></span>
                             <span><b>Execution:</b> M1 Scalping & Trend Follow</span>
                         </div>
                     </div>
 
                     <!-- 2. LONDON SESSION -->
-                    <div class="pkt-card" id="pkt-card-london" style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 12px 16px; transition: all 0.3s ease;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                            <span style="font-size: 14px; font-weight: 700; color: var(--accent-emerald); display: flex; align-items: center; gap: 6px;">
+                    <div class="pkt-card" id="pkt-card-london"
+                        style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 12px 16px; transition: all 0.3s ease;">
+                        <div
+                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                            <span
+                                style="font-size: 14px; font-weight: 700; color: var(--accent-emerald); display: flex; align-items: center; gap: 6px;">
                                 <i class="fa-solid fa-sterling-sign"></i> 12:00 PM – 5:00 PM PKT
                             </span>
-                            <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: var(--accent-emerald); border: 1px solid var(--accent-emerald); font-size: 10px; font-weight: 800;">
+                            <span class="badge"
+                                style="background: rgba(16, 185, 129, 0.2); color: var(--accent-emerald); border: 1px solid var(--accent-emerald); font-size: 10px; font-weight: 800;">
                                 🟢 GREAT (9/10) — LONDON SESSION
                             </span>
                         </div>
-                        <p style="font-size: 12px; color: #cbd5e1; margin: 0 0 6px 0;">London Open & Main Session | High Liquidity, Clean Structure Breakouts</p>
+                        <p style="font-size: 12px; color: #cbd5e1; margin: 0 0 6px 0;">London Open & Main Session | High
+                            Liquidity, Clean Structure Breakouts</p>
                         <div style="font-size: 11px; color: #94a3b8; display: flex; gap: 14px;">
-                            <span><b>Recommended Profile:</b> <code style="color: var(--accent-cyan);">HYBRID_AUTO</code></span>
+                            <span><b>Recommended Profile:</b> <code
+                                    style="color: var(--accent-cyan);">HYBRID_AUTO</code></span>
                             <span><b>Execution:</b> SMC Breakouts & Order Blocks</span>
                         </div>
                     </div>
 
                     <!-- 3. EARLY NEW YORK -->
-                    <div class="pkt-card" id="pkt-card-ny" style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 8px; padding: 12px 16px; transition: all 0.3s ease;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                            <span style="font-size: 14px; font-weight: 700; color: var(--accent-cyan); display: flex; align-items: center; gap: 6px;">
+                    <div class="pkt-card" id="pkt-card-ny"
+                        style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 8px; padding: 12px 16px; transition: all 0.3s ease;">
+                        <div
+                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                            <span
+                                style="font-size: 14px; font-weight: 700; color: var(--accent-cyan); display: flex; align-items: center; gap: 6px;">
                                 <i class="fa-solid fa-dollar-sign"></i> 9:00 PM – 11:00 PM PKT
                             </span>
-                            <span class="badge" style="background: rgba(56, 189, 248, 0.2); color: var(--accent-cyan); border: 1px solid var(--accent-cyan); font-size: 10px; font-weight: 800;">
+                            <span class="badge"
+                                style="background: rgba(56, 189, 248, 0.2); color: var(--accent-cyan); border: 1px solid var(--accent-cyan); font-size: 10px; font-weight: 800;">
                                 🟡 GOOD (7.5/10) — EARLY NEW YORK
                             </span>
                         </div>
-                        <p style="font-size: 12px; color: #cbd5e1; margin: 0 0 6px 0;">New York Main Session | Sustained Momentum before Volume Tapers</p>
+                        <p style="font-size: 12px; color: #cbd5e1; margin: 0 0 6px 0;">New York Main Session | Sustained
+                            Momentum before Volume Tapers</p>
                         <div style="font-size: 11px; color: #94a3b8; display: flex; gap: 14px;">
-                            <span><b>Recommended Profile:</b> <code style="color: var(--accent-cyan);">HYBRID_AUTO</code></span>
+                            <span><b>Recommended Profile:</b> <code
+                                    style="color: var(--accent-cyan);">HYBRID_AUTO</code></span>
                             <span><b>Execution:</b> Dynamic Trailing Active</span>
                         </div>
                     </div>
 
                     <!-- 4. ASIAN & ROLLOVER -->
-                    <div class="pkt-card" id="pkt-card-asian" style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; padding: 12px 16px; transition: all 0.3s ease;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                            <span style="font-size: 14px; font-weight: 700; color: var(--accent-red); display: flex; align-items: center; gap: 6px;">
+                    <div class="pkt-card" id="pkt-card-asian"
+                        style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; padding: 12px 16px; transition: all 0.3s ease;">
+                        <div
+                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                            <span
+                                style="font-size: 14px; font-weight: 700; color: var(--accent-red); display: flex; align-items: center; gap: 6px;">
                                 <i class="fa-solid fa-moon"></i> 11:00 PM – 12:00 PM PKT
                             </span>
-                            <span class="badge" style="background: rgba(239, 68, 68, 0.2); color: var(--accent-red); border: 1px solid var(--accent-red); font-size: 10px; font-weight: 800;">
+                            <span class="badge"
+                                style="background: rgba(239, 68, 68, 0.2); color: var(--accent-red); border: 1px solid var(--accent-red); font-size: 10px; font-weight: 800;">
                                 🔴 AVOID M1 SCALPING — ASIAN / NIGHT
                             </span>
                         </div>
-                        <p style="font-size: 12px; color: #cbd5e1; margin: 0 0 6px 0;">Asian Range & Rollover (12 AM - 2 AM PKT Spreads Widen) | Flat Chop</p>
+                        <p style="font-size: 12px; color: #cbd5e1; margin: 0 0 6px 0;">Asian Range & Rollover (12 AM - 2
+                            AM PKT Spreads Widen) | Flat Chop</p>
                         <div style="font-size: 11px; color: #94a3b8; display: flex; gap: 14px;">
-                            <span><b>Action:</b> <code style="color: var(--accent-red);">PAUSE AUTO-TRADE</code> or <code style="color: var(--accent-amber);">BB_MEAN_REVERSION</code></span>
+                            <span><b>Action:</b> <code style="color: var(--accent-red);">PAUSE AUTO-TRADE</code> or
+                                <code style="color: var(--accent-amber);">BB_MEAN_REVERSION</code></span>
                         </div>
                     </div>
 
@@ -1095,30 +1336,37 @@
     <div class="modal-overlay hidden" id="modal-backtest">
         <div class="modal-card" style="max-width: 960px; max-height: 90vh; overflow-y: auto;">
             <div class="modal-header" style="border-bottom: 1px solid rgba(168, 85, 247, 0.25);">
-                <h2><i class="fa-solid fa-history" style="color: var(--accent-purple);"></i> BACKTEST — HISTORICAL STRATEGY SIMULATION</h2>
+                <h2><i class="fa-solid fa-history" style="color: var(--accent-purple);"></i> BACKTEST — HISTORICAL
+                    STRATEGY SIMULATION</h2>
                 <button class="btn-close-modal" id="btn-close-backtest">&times;</button>
             </div>
             <div class="modal-body" style="gap: 16px; display: flex; flex-direction: column;">
-                
+
                 <!-- Error Alert Banner -->
-                <div id="bt-error-banner" class="hidden" style="background: rgba(239, 68, 68, 0.15); border: 1px solid var(--accent-red); color: #fca5a5; padding: 10px 14px; border-radius: 6px; font-size: 12px;">
-                    <i class="fa-solid fa-triangle-exclamation"></i> <strong>BACKTEST FAILED:</strong> <span id="bt-error-msg"></span>
+                <div id="bt-error-banner" class="hidden"
+                    style="background: rgba(239, 68, 68, 0.15); border: 1px solid var(--accent-red); color: #fca5a5; padding: 10px 14px; border-radius: 6px; font-size: 12px;">
+                    <i class="fa-solid fa-triangle-exclamation"></i> <strong>BACKTEST FAILED:</strong> <span
+                        id="bt-error-msg"></span>
                 </div>
 
                 <!-- 1. BACKTEST CONFIGURATION PANEL FORM -->
-                <form id="form-backtest-config" style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 14px;">
+                <form id="form-backtest-config"
+                    style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 14px;">
                     <h3 style="font-size: 13px; color: var(--accent-purple); margin-bottom: 10px; font-weight: 600;">
                         <i class="fa-solid fa-sliders"></i> Simulation Parameters & Historical Range
                     </h3>
-                    
-                    <div class="grid-4col" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 10px;">
+
+                    <div class="grid-4col"
+                        style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 10px;">
                         <div class="control-group">
                             <label style="font-size: 11px;">Symbol</label>
-                            <input type="text" id="bt-cfg-symbol" class="form-control" value="XAUUSD" style="padding: 4px 8px; font-size: 12px;">
+                            <input type="text" id="bt-cfg-symbol" class="form-control" value="XAUUSD"
+                                style="padding: 4px 8px; font-size: 12px;">
                         </div>
                         <div class="control-group">
                             <label style="font-size: 11px;">Timeframe</label>
-                            <select id="bt-cfg-timeframe" class="form-control" style="padding: 4px 8px; font-size: 12px;">
+                            <select id="bt-cfg-timeframe" class="form-control"
+                                style="padding: 4px 8px; font-size: 12px;">
                                 <option value="M1">M1 (Scalp)</option>
                                 <option value="M5">M5</option>
                                 <option value="M15" selected>M15 (Standard)</option>
@@ -1128,96 +1376,127 @@
                         </div>
                         <div class="control-group">
                             <label style="font-size: 11px;">From Date</label>
-                            <input type="date" id="bt-cfg-from-date" class="form-control" style="padding: 4px 8px; font-size: 12px;">
+                            <input type="date" id="bt-cfg-from-date" class="form-control"
+                                style="padding: 4px 8px; font-size: 12px;">
                         </div>
                         <div class="control-group">
                             <label style="font-size: 11px;">To Date</label>
-                            <input type="date" id="bt-cfg-to-date" class="form-control" style="padding: 4px 8px; font-size: 12px;">
+                            <input type="date" id="bt-cfg-to-date" class="form-control"
+                                style="padding: 4px 8px; font-size: 12px;">
                         </div>
                     </div>
 
-                    <div class="grid-4col" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 10px;">
+                    <div class="grid-4col"
+                        style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 10px;">
                         <div class="control-group">
                             <label style="font-size: 11px;">Initial Balance ($)</label>
-                            <input type="number" id="bt-cfg-balance" class="form-control" value="10000" style="padding: 4px 8px; font-size: 12px;">
+                            <input type="number" id="bt-cfg-balance" class="form-control" value="10000"
+                                style="padding: 4px 8px; font-size: 12px;">
                         </div>
                         <div class="control-group">
                             <label style="font-size: 11px;">Risk Per Trade (%)</label>
-                            <input type="number" step="0.1" id="bt-cfg-risk-pct" class="form-control" value="1.0" style="padding: 4px 8px; font-size: 12px;">
+                            <input type="number" step="0.1" id="bt-cfg-risk-pct" class="form-control" value="1.0"
+                                style="padding: 4px 8px; font-size: 12px;">
                         </div>
                         <div class="control-group">
                             <label style="font-size: 11px;">Lot Sizing Mode</label>
-                            <select id="bt-cfg-lot-mode" class="form-control" style="padding: 4px 8px; font-size: 12px;">
+                            <select id="bt-cfg-lot-mode" class="form-control"
+                                style="padding: 4px 8px; font-size: 12px;">
                                 <option value="FIXED" selected>Fixed Lot</option>
                                 <option value="AUTO_RISK">Auto Risk-Based</option>
                             </select>
                         </div>
                         <div class="control-group">
                             <label style="font-size: 11px;">Fixed Lot Size</label>
-                            <input type="number" step="0.01" id="bt-cfg-user-lot" class="form-control" value="0.10" style="padding: 4px 8px; font-size: 12px;">
+                            <input type="number" step="0.01" id="bt-cfg-user-lot" class="form-control" value="0.10"
+                                style="padding: 4px 8px; font-size: 12px;">
                         </div>
                     </div>
 
-                    <div class="grid-4col" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px;">
+                    <div class="grid-4col"
+                        style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px;">
                         <div class="control-group">
                             <label style="font-size: 11px;">Cooldown (Sec)</label>
-                            <input type="number" step="5" id="bt-cfg-cooldown" class="form-control" value="300" style="padding: 4px 8px; font-size: 12px;">
+                            <input type="number" step="5" id="bt-cfg-cooldown" class="form-control" value="300"
+                                style="padding: 4px 8px; font-size: 12px;">
                         </div>
                         <div class="control-group">
                             <label style="font-size: 11px;">Daily Loss Limit (%)</label>
-                            <input type="number" step="0.5" id="bt-cfg-daily-loss" class="form-control" value="3.0" style="padding: 4px 8px; font-size: 12px;">
+                            <input type="number" step="0.5" id="bt-cfg-daily-loss" class="form-control" value="3.0"
+                                style="padding: 4px 8px; font-size: 12px;">
                         </div>
                         <div class="control-group">
                             <label style="font-size: 11px;">Max Consecutive Loss</label>
-                            <input type="number" step="1" id="bt-cfg-max-consec" class="form-control" value="3" style="padding: 4px 8px; font-size: 12px;">
+                            <input type="number" step="1" id="bt-cfg-max-consec" class="form-control" value="3"
+                                style="padding: 4px 8px; font-size: 12px;">
                         </div>
                         <div class="control-group">
                             <label style="font-size: 11px;">Max Spread (Pips)</label>
-                            <input type="number" step="0.1" id="bt-cfg-max-spread" class="form-control" value="2.5" style="padding: 4px 8px; font-size: 12px;">
+                            <input type="number" step="0.1" id="bt-cfg-max-spread" class="form-control" value="2.5"
+                                style="padding: 4px 8px; font-size: 12px;">
                         </div>
                     </div>
 
-                    <button type="submit" class="btn btn-purple btn-block" id="btn-run-backtest-submit" style="padding: 8px;">
+                    <button type="submit" class="btn btn-purple btn-block" id="btn-run-backtest-submit"
+                        style="padding: 8px;">
                         <i class="fa-solid fa-play"></i> RUN HISTORICAL SIMULATION ENGINE
                     </button>
                 </form>
 
                 <!-- 2. PERFORMANCE METRICS & SUMMARY GRID -->
                 <div class="metrics-grid" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px;">
-                    <div class="metric-box"><span>Initial Balance</span> <strong id="bt-init-balance">$10,000</strong></div>
-                    <div class="metric-box"><span>Final Balance</span> <strong id="bt-final-balance">$10,000</strong></div>
+                    <div class="metric-box"><span>Initial Balance</span> <strong id="bt-init-balance">$10,000</strong>
+                    </div>
+                    <div class="metric-box"><span>Final Balance</span> <strong id="bt-final-balance">$10,000</strong>
+                    </div>
                     <div class="metric-box"><span>Net Profit</span> <strong id="bt-net-profit">$0.00</strong></div>
                     <div class="metric-box"><span>ROI %</span> <strong id="bt-roi-pct">0.0%</strong></div>
                     <div class="metric-box"><span>Win Rate</span> <strong id="bt-win-rate">0.0%</strong></div>
                     <div class="metric-box"><span>Total Trades</span> <strong id="bt-total-trades">0</strong></div>
-                    <div class="metric-box"><span>Winning Trades</span> <strong id="bt-winning-trades" class="text-emerald">0</strong></div>
-                    <div class="metric-box"><span>Losing Trades</span> <strong id="bt-losing-trades" class="text-red">0</strong></div>
-                    <div class="metric-box"><span>Break-Even Trades</span> <strong id="bt-breakeven-trades">0</strong></div>
+                    <div class="metric-box"><span>Winning Trades</span> <strong id="bt-winning-trades"
+                            class="text-emerald">0</strong></div>
+                    <div class="metric-box"><span>Losing Trades</span> <strong id="bt-losing-trades"
+                            class="text-red">0</strong></div>
+                    <div class="metric-box"><span>Break-Even Trades</span> <strong id="bt-breakeven-trades">0</strong>
+                    </div>
                     <div class="metric-box"><span>Profit Factor</span> <strong id="bt-profit-factor">0.00</strong></div>
                     <div class="metric-box"><span>Sharpe Ratio</span> <strong id="bt-sharpe">0.00</strong></div>
                     <div class="metric-box"><span>Sortino Ratio</span> <strong id="bt-sortino">0.00</strong></div>
-                    <div class="metric-box"><span>Max Drawdown</span> <strong id="bt-max-dd" class="text-red">0.0%</strong></div>
-                    <div class="metric-box"><span>Max Consec Loss</span> <strong id="bt-max-consec-losses">0</strong></div>
+                    <div class="metric-box"><span>Max Drawdown</span> <strong id="bt-max-dd"
+                            class="text-red">0.0%</strong></div>
+                    <div class="metric-box"><span>Max Consec Loss</span> <strong id="bt-max-consec-losses">0</strong>
+                    </div>
                     <div class="metric-box"><span>Stress Min PF</span> <strong id="bt-stress-pf">0.00</strong></div>
                 </div>
 
                 <!-- 3. TRADE OPPORTUNITY & REJECTION ANALYTICS CARD -->
-                <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 12px;">
+                <div
+                    style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 12px;">
                     <h3 style="font-size: 12px; color: var(--accent-cyan); margin-bottom: 8px; font-weight: 600;">
                         <i class="fa-solid fa-filter-circle-xmark"></i> Trade Opportunity & Rejection Analysis
                     </h3>
-                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 8px; margin-bottom: 8px;">
-                        <span>Total Signals/Opportunities Detected: <strong id="bt-total-opps" style="color: #fff;">0</strong></span>
-                        <span>Executed Trades: <strong id="bt-executed-count" style="color: var(--accent-emerald);">0</strong></span>
-                        <span>Blocked / Rejected: <strong id="bt-blocked-count" style="color: var(--accent-red);">0</strong></span>
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 8px; margin-bottom: 8px;">
+                        <span>Total Signals/Opportunities Detected: <strong id="bt-total-opps"
+                                style="color: #fff;">0</strong></span>
+                        <span>Executed Trades: <strong id="bt-executed-count"
+                                style="color: var(--accent-emerald);">0</strong></span>
+                        <span>Blocked / Rejected: <strong id="bt-blocked-count"
+                                style="color: var(--accent-red);">0</strong></span>
                     </div>
                     <div style="display: flex; gap: 8px; flex-wrap: wrap; font-size: 11px;">
-                        <span class="badge" style="background: rgba(255,255,255,0.05); color: #cbd5e1;">Cooldown Blocked: <b id="rej-cooldown-count">0</b></span>
-                        <span class="badge" style="background: rgba(255,255,255,0.05); color: #cbd5e1;">Spread Blocked: <b id="rej-spread-count">0</b></span>
-                        <span class="badge" style="background: rgba(255,255,255,0.05); color: #cbd5e1;">Daily Loss Blocked: <b id="rej-daily-loss-count">0</b></span>
-                        <span class="badge" style="background: rgba(255,255,255,0.05); color: #cbd5e1;">Consecutive Loss Blocked: <b id="rej-consec-loss-count">0</b></span>
-                        <span class="badge" style="background: rgba(255,255,255,0.05); color: #cbd5e1;">Low Confidence: <b id="rej-low-conf-count">0</b></span>
-                        <span class="badge" style="background: rgba(255,255,255,0.05); color: #cbd5e1;">Low R:R Ratio: <b id="rej-rr-count">0</b></span>
+                        <span class="badge" style="background: rgba(255,255,255,0.05); color: #cbd5e1;">Cooldown
+                            Blocked: <b id="rej-cooldown-count">0</b></span>
+                        <span class="badge" style="background: rgba(255,255,255,0.05); color: #cbd5e1;">Spread Blocked:
+                            <b id="rej-spread-count">0</b></span>
+                        <span class="badge" style="background: rgba(255,255,255,0.05); color: #cbd5e1;">Daily Loss
+                            Blocked: <b id="rej-daily-loss-count">0</b></span>
+                        <span class="badge" style="background: rgba(255,255,255,0.05); color: #cbd5e1;">Consecutive Loss
+                            Blocked: <b id="rej-consec-loss-count">0</b></span>
+                        <span class="badge" style="background: rgba(255,255,255,0.05); color: #cbd5e1;">Low Confidence:
+                            <b id="rej-low-conf-count">0</b></span>
+                        <span class="badge" style="background: rgba(255,255,255,0.05); color: #cbd5e1;">Low R:R Ratio:
+                            <b id="rej-rr-count">0</b></span>
                     </div>
                 </div>
 
@@ -1229,12 +1508,17 @@
 
                 <!-- 5. SUB-TAB VIEW FOR EXECUTED TRADES vs BLOCKED OPPORTUNITIES -->
                 <div style="margin-top: 4px;">
-                    <div class="sub-tabs-header" style="display: flex; gap: 10px; border-bottom: 1px solid rgba(255,255,255,0.1); margin-bottom: 8px;">
-                        <button class="btn btn-sm btn-outline active" id="btn-bt-tab-executed" onclick="switchBacktestTab('executed')">
-                            <i class="fa-solid fa-list-check"></i> Executed Trades (<span id="count-bt-executed">0</span>)
+                    <div class="sub-tabs-header"
+                        style="display: flex; gap: 10px; border-bottom: 1px solid rgba(255,255,255,0.1); margin-bottom: 8px;">
+                        <button class="btn btn-sm btn-outline active" id="btn-bt-tab-executed"
+                            onclick="switchBacktestTab('executed')">
+                            <i class="fa-solid fa-list-check"></i> Executed Trades (<span
+                                id="count-bt-executed">0</span>)
                         </button>
-                        <button class="btn btn-sm btn-outline" id="btn-bt-tab-blocked" onclick="switchBacktestTab('blocked')">
-                            <i class="fa-solid fa-ban"></i> Blocked Setup Inspector (<span id="count-bt-blocked">0</span>)
+                        <button class="btn btn-sm btn-outline" id="btn-bt-tab-blocked"
+                            onclick="switchBacktestTab('blocked')">
+                            <i class="fa-solid fa-ban"></i> Blocked Setup Inspector (<span
+                                id="count-bt-blocked">0</span>)
                         </button>
                     </div>
 
@@ -1256,7 +1540,9 @@
                                 </tr>
                             </thead>
                             <tbody id="backtest-trades-table-body">
-                                <tr><td colspan="10" class="text-center">No backtest trades executed.</td></tr>
+                                <tr>
+                                    <td colspan="10" class="text-center">No backtest trades executed.</td>
+                                </tr>
                             </tbody>
                         </table>
                     </div>
@@ -1277,7 +1563,9 @@
                                 </tr>
                             </thead>
                             <tbody id="backtest-blocked-table-body">
-                                <tr><td colspan="8" class="text-center">No blocked setup opportunities recorded.</td></tr>
+                                <tr>
+                                    <td colspan="8" class="text-center">No blocked setup opportunities recorded.</td>
+                                </tr>
                             </tbody>
                         </table>
                     </div>
@@ -1289,4 +1577,5 @@
 
     <script src="app.js"></script>
 </body>
+
 </html>

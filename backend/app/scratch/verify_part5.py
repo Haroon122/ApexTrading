@@ -63,7 +63,10 @@ async def test_outcome_learning_loop():
         row = cursor.fetchone()
         print(f"Initial Trade: win_loss={row['win_loss']}, exit_price={row['exit_price']}, pnl_usd={row['pnl_usd']}")
         assert row["win_loss"] == "PENDING"
-        
+    
+    # Resolve pending test trade outcome
+    trade_learner.update_trade_outcome(trade_id, 1.08900, 40.0, 40.0)
+
     # 2. Simulate outcomes to trigger learning updates
     # We will log 10 wins and 10 losses to verify threshold optimization calculations
     print("Simulating 15 wins and 2 losses to test relaxation threshold shift...")

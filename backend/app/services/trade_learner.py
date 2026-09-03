@@ -135,6 +135,29 @@ class TradeLearnerService:
             logger.error(f"[TRADE LEARNER] Failed to update trade outcome #{trade_id}: {e}")
             return False
 
+    def mark_trade_discrepancy(
+        self,
+        trade_id: str,
+        reason: str = "RECONCILIATION_DISCREPANCY",
+        close_timestamp: Optional[datetime] = None
+    ) -> bool:
+        ts = (close_timestamp or datetime.now()).isoformat()
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE trade_history_memory
+                    SET win_loss = 'DISCREPANCY', exit_reason = ?, close_timestamp = ?
+                    WHERE trade_id = ?
+                """, (reason, ts, trade_id))
+                conn.commit()
+                logger.info(f"[TRADE LEARNER] Marked trade #{trade_id} as DISCREPANCY ({reason})")
+                return True
+        except Exception as e:
+            logger.error(f"[TRADE LEARNER] Failed to mark trade discrepancy #{trade_id}: {e}")
+            return False
+
+
     def get_optimized_thresholds(self, symbol: str = "EURUSD", regime: str = "UNKNOWN") -> Dict[str, float]:
         """
         Queries historical performance in memory and dynamically calculates optimal thresholds.
@@ -289,33 +312,51 @@ class TradeLearnerService:
         pnl_usd: float,
         open_time: datetime,
         close_time: datetime,
-        comment: str = "CLOSED"
+        comment: str = "CLOSED",
+        setup_name: str = "Unknown"
     ):
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT trade_id, win_loss FROM trade_history_memory WHERE trade_id = ?", (trade_id,))
+                cursor.execute("SELECT trade_id, win_loss, setup_name FROM trade_history_memory WHERE trade_id = ?", (trade_id,))
                 row = cursor.fetchone()
                 
                 open_ts = open_time.isoformat()
                 close_ts = close_time.isoformat()
                 win_loss = "WIN" if pnl_usd > 0.05 else ("LOSS" if pnl_usd < -0.05 else "EVEN")
                 
+                # Recover setup_name hierarchy:
+                # 1. Existing DB row setup_name (if non-Unknown)
+                # 2. Passed parameter or trade_manager.active_trades memory lookup
+                # 3. Fallback to 'Unknown'
+                resolved_setup = setup_name
+                if row and row["setup_name"] and row["setup_name"] != "Unknown":
+                    resolved_setup = row["setup_name"]
+                elif resolved_setup == "Unknown":
+                    try:
+                        from app.services.trade_manager import trade_manager
+                        if trade_id in trade_manager.active_trades:
+                            active_t = trade_manager.active_trades[trade_id]
+                            if getattr(active_t, 'setup_name', None):
+                                resolved_setup = active_t.setup_name
+                    except Exception:
+                        pass
+
                 if row:
                     if row["win_loss"] == "PENDING" or pnl_usd != 0.0:
                         cursor.execute("""
                             UPDATE trade_history_memory
-                            SET exit_price = ?, pnl_usd = ?, win_loss = ?, exit_reason = ?, close_timestamp = ?
+                            SET exit_price = ?, pnl_usd = ?, win_loss = ?, exit_reason = ?, close_timestamp = ?, setup_name = ?
                             WHERE trade_id = ?
-                        """, (exit_price, pnl_usd, win_loss, comment, close_ts, trade_id))
+                        """, (exit_price, pnl_usd, win_loss, comment, close_ts, resolved_setup, trade_id))
                 else:
                     cursor.execute("""
                         INSERT INTO trade_history_memory (
                             trade_id, symbol, side, timeframe, entry_price, exit_price, lots,
-                            pnl_usd, win_loss, open_timestamp, close_timestamp, exit_reason
-                        ) VALUES (?, ?, ?, 'M15', ?, ?, ?, ?, ?, ?, ?, ?)
+                            pnl_usd, win_loss, open_timestamp, close_timestamp, exit_reason, setup_name
+                        ) VALUES (?, ?, ?, 'M15', ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (trade_id, symbol, side, entry_price, exit_price, lots,
-                          pnl_usd, win_loss, open_ts, close_ts, comment))
+                          pnl_usd, win_loss, open_ts, close_ts, comment, resolved_setup))
                 conn.commit()
         except Exception as e:
             logger.error(f"[TRADE LEARNER] Error syncing deal {trade_id} to DB: {e}")

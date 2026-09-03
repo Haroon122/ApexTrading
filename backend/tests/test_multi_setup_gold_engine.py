@@ -44,6 +44,7 @@ class TestMultiSetupGoldEngine(unittest.TestCase):
             strategy_profile="HYBRID_AUTO",
             signal_mode="CLOSED_CANDLE"
         )
+        news_filter.use_mock_news = False
         signal_history.clear()
 
     def _generate_candles(self, count=50, base_price=2350.0, trend=0.0):
@@ -125,6 +126,7 @@ class TestMultiSetupGoldEngine(unittest.TestCase):
     def test_5_mock_news_bypass_config(self):
         """TEST 5: Verify mock news provider does not silently block live trades unless configured"""
         news_filter.use_mock_news = False
+        news_filter.provider = MockCalendarProvider()
         is_blocked, msg = news_filter.is_news_blackout("XAUUSD")
         self.assertFalse(is_blocked, "Mock news must not block trades when use_mock_news = False")
 

@@ -141,9 +141,9 @@ class RiskManager:
 
         # 5. Position Sizing (Lots): FIXED mode vs DYNAMIC_RISK mode
         lot_mode = getattr(risk_cfg, "lot_sizing_mode", "FIXED").upper()
-        user_fixed_lot = float(getattr(risk_cfg, "user_configured_lot", 0.10) or 0.10)
+        user_fixed_lot = float(getattr(risk_cfg, "user_configured_lot", 0.01) or 0.01)
         max_allowed_lot = float(getattr(risk_cfg, "max_allowed_lot", 1.00) or 1.00)
-        default_lot = float(getattr(risk_cfg, "default_lot_size", 0.10) or 0.10)
+        default_lot = float(getattr(risk_cfg, "default_lot_size", 0.01) or 0.01)
         user_max_risk_pct = float(getattr(risk_cfg, "max_risk_per_trade_pct", settings.MAX_RISK_PER_TRADE_PCT))
         
         from app.services.gold_specs import gold_specs
@@ -195,28 +195,44 @@ class RiskManager:
                 # Round lots to nearest step
                 if vol_step > 0:
                     calculated_lots = round(round(calculated_lots / vol_step) * vol_step, 2)
+                # Clamp to broker minimum volume (0.01) for micro accounts
+                if calculated_lots < vol_min:
+                    calculated_lots = vol_min
                 logger.info(f"[RISK MANAGER PIPELINE STAGE] Mode: DYNAMIC_RISK | calculated_lots={calculated_lots}")
 
         # Safety Check: Hard Maximum Allowed Lot Cap
-        if calculated_lots > max_allowed_lot:
-            reasons.append(
-                f"ORDER BLOCKED — EXCEEDS MAX ALLOWED LOT: Calculated lot size ({calculated_lots:.2f}) exceeds maximum allowed lot cap of {max_allowed_lot:.2f} lots."
-            )
-            calculated_lots = 0.0
+        if lot_mode == "DYNAMIC_RISK":
+            # Auto-adjust cap based on equity ($1,000 equity = 1.0 lot cap), up to broker vol_max
+            dynamic_equity_cap = max(max_allowed_lot, round(account.equity / 1000.0, 2))
+            effective_max_lot = min(vol_max, dynamic_equity_cap)
 
-        # Safety Check: Broker Min Volume
-        elif calculated_lots < vol_min:
-            reasons.append(
-                f"Calculated lot size ({calculated_lots:.2f}) is below broker minimum of {vol_min:.2f} lots. Trade rejected."
-            )
-            calculated_lots = 0.0
+            # Rejection safety for extreme SL division glitches (> 500 lots)
+            if calculated_lots > 500.0:
+                reasons.append(
+                    f"ORDER BLOCKED — EXCEEDS MAX ALLOWED LOT: Calculated lot size ({calculated_lots:.2f}) exceeds maximum allowed lot cap of {effective_max_lot:.2f} lots."
+                )
+                calculated_lots = 0.0
+            elif calculated_lots > effective_max_lot:
+                logger.info(
+                    f"[RISK MANAGER] Dynamic calculated lot ({calculated_lots:.2f}) auto-adjusted to effective lot cap ({effective_max_lot:.2f})."
+                )
+                calculated_lots = effective_max_lot
+        else:
+            if calculated_lots > max_allowed_lot:
+                reasons.append(
+                    f"ORDER BLOCKED — EXCEEDS MAX ALLOWED LOT: Calculated lot size ({calculated_lots:.2f}) exceeds maximum allowed lot cap of {max_allowed_lot:.2f} lots."
+                )
+                calculated_lots = 0.0
 
-        # Safety Check: Broker Max Volume Clamping
-        elif calculated_lots > vol_max:
-            reasons.append(
-                f"ORDER BLOCKED — EXCEEDS BROKER MAX VOLUME: Calculated lot size ({calculated_lots:.2f}) exceeds broker max volume of {vol_max:.2f} lots."
-            )
-            calculated_lots = 0.0
+        # Safety Check: Broker Min / Max Volume Clamping
+        if calculated_lots > 0:
+            if calculated_lots < vol_min:
+                calculated_lots = vol_min
+            elif calculated_lots > vol_max:
+                reasons.append(
+                    f"ORDER BLOCKED — EXCEEDS BROKER MAX VOLUME: Calculated lot size ({calculated_lots:.2f}) exceeds broker max volume of {vol_max:.2f} lots."
+                )
+                calculated_lots = 0.0
 
         tp_distance = abs(report.suggested_tp - report.suggested_entry)
         tp_points = tp_distance / (point or 1e-9)

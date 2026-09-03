@@ -245,8 +245,11 @@ class DecisionEngine:
 
         # -------------------------------------------------------------
         # SETUP C: LIQUIDITY SWEEP REVERSAL (HTF & RSI Guarded)
+        # DISABLED — negative expectancy across 65 combined live trades.
+        # Re-enable via settings.SETUP_C_LIQUIDITY_SWEEP_ENABLED = True
+        # (or env var SETUP_C_LIQUIDITY_SWEEP_ENABLED=true) after rework.
         # -------------------------------------------------------------
-        if struct_m15 is not None:
+        if getattr(settings, "SETUP_C_LIQUIDITY_SWEEP_ENABLED", False) and struct_m15 is not None:
             if struct_m15.liquidity_sweeps:
                 last_sweep = struct_m15.liquidity_sweeps[-1]
                 if last_sweep.side == TradeSide.SELL and close > open_p:
@@ -347,6 +350,10 @@ class DecisionEngine:
                 "type": "momentum"
             })
 
+        disabled = getattr(trade_manager.risk_settings, "disabled_setups", [])
+        if disabled:
+            setups = [s for s in setups if s.get("name") not in disabled and s.get("id") not in disabled]
+
         return setups
 
     def evaluate_trade_opportunity(
@@ -361,7 +368,6 @@ class DecisionEngine:
     ) -> TradeDecisionReport:
         from app.services.trade_manager import trade_manager
         
-        timeframe = "M1"
         reasoning = []
         rejection_reasons = []
         
@@ -473,6 +479,21 @@ class DecisionEngine:
                 h1_trend = "BULLISH" if h1_close > h1_ema20 >= h1_ema50 else ("BEARISH" if h1_close < h1_ema20 <= h1_ema50 else "NEUTRAL")
                 self._htf_cache[cache_key] = h1_trend
 
+        h4_trend = "NEUTRAL"
+        if htf_candles and "H4" in htf_candles and len(htf_candles["H4"]) >= 20:
+            h4_last_ts = htf_candles["H4"][-1].timestamp
+            cache_key = ("H4_trend", h4_last_ts)
+            if cache_key in self._htf_cache:
+                h4_trend = self._htf_cache[cache_key]
+            else:
+                df_h4 = IndicatorService.calculate_all_indicators(htf_candles["H4"], bb_period=bb_period_val, bb_std=bb_std_val)
+                h4_latest = df_h4.iloc[-1]
+                h4_close = float(h4_latest["close"])
+                h4_ema20 = float(h4_latest.get("ema_20", h4_close))
+                h4_ema50 = float(h4_latest.get("ema_50", h4_close))
+                h4_trend = "BULLISH" if h4_close > h4_ema20 >= h4_ema50 else ("BEARISH" if h4_close < h4_ema20 <= h4_ema50 else "NEUTRAL")
+                self._htf_cache[cache_key] = h4_trend
+
         buy_setups = [s for s in active_setups if s.get("active") and s.get("side") == TradeSide.BUY]
         sell_setups = [s for s in active_setups if s.get("active") and s.get("side") == TradeSide.SELL]
 
@@ -485,9 +506,20 @@ class DecisionEngine:
         is_buy_reversal = best_buy_setup and best_buy_setup.get("type") in ("reversal", "breakout_retest")
         is_sell_reversal = best_sell_setup and best_sell_setup.get("type") in ("reversal", "breakout_retest")
 
-        # 1. Context Score (20 pts)
-        context_long = 20.0 if h1_trend == "BULLISH" or is_buy_reversal else (10.0 if h1_trend == "NEUTRAL" else 0.0)
-        context_short = 20.0 if h1_trend == "BEARISH" or is_sell_reversal else (10.0 if h1_trend == "NEUTRAL" else 0.0)
+        # 1. Context Score (20 pts: Macro H1 + H4 + Wyckoff)
+        base_long = 20.0 if h1_trend == "BULLISH" or is_buy_reversal else (10.0 if h1_trend == "NEUTRAL" else 0.0)
+        base_short = 20.0 if h1_trend == "BEARISH" or is_sell_reversal else (10.0 if h1_trend == "NEUTRAL" else 0.0)
+
+        if h4_trend == "BEARISH" and h1_trend == "BULLISH" and not is_buy_reversal:
+            context_long = max(5.0, base_long - 7.5)
+        else:
+            context_long = base_long
+
+        if h4_trend == "BULLISH" and h1_trend == "BEARISH" and not is_sell_reversal:
+            context_short = max(5.0, base_short - 7.5)
+        else:
+            context_short = base_short
+
         if wyckoff_res.bias == "BULLISH":
             context_long = min(20.0, context_long + 5.0)
         elif wyckoff_res.bias == "BEARISH":
@@ -570,10 +602,45 @@ class DecisionEngine:
             candidate_side = TradeSide.SELL
 
         # -------------------------------------------------------------
+        # HTF (H1 + M15) Alignment Hard Gate (Opt-in via config / risk_settings)
+        # -------------------------------------------------------------
+        htf_filter_enabled = getattr(trade_manager.risk_settings, "htf_alignment_filter_enabled", getattr(settings, "HTF_ALIGNMENT_FILTER_ENABLED", False))
+        htf_mode = getattr(trade_manager.risk_settings, "htf_alignment_mode", getattr(settings, "HTF_ALIGNMENT_MODE", "MODERATE")).upper()
+
+        htf_blocked = False
+        htf_block_reason = ""
+        if htf_filter_enabled and candidate_side in (TradeSide.BUY, TradeSide.SELL):
+            m15_trend = structure.trend
+            if candidate_side == TradeSide.BUY:
+                if htf_mode == "STRICT":
+                    if not (h1_trend == "BULLISH" and m15_trend == "BULLISH"):
+                        htf_blocked = True
+                        htf_block_reason = f"HTF Alignment (STRICT) blocked BUY: H1={h1_trend}, M15={m15_trend} (both must be BULLISH)"
+                else:  # MODERATE
+                    if h1_trend == "BEARISH" or m15_trend == "BEARISH":
+                        htf_blocked = True
+                        htf_block_reason = f"HTF Alignment (MODERATE) blocked BUY: H1={h1_trend}, M15={m15_trend} (opposing BEARISH trend)"
+            elif candidate_side == TradeSide.SELL:
+                if htf_mode == "STRICT":
+                    if not (h1_trend == "BEARISH" and m15_trend == "BEARISH"):
+                        htf_blocked = True
+                        htf_block_reason = f"HTF Alignment (STRICT) blocked SELL: H1={h1_trend}, M15={m15_trend} (both must be BEARISH)"
+                else:  # MODERATE
+                    if h1_trend == "BULLISH" or m15_trend == "BULLISH":
+                        htf_blocked = True
+                        htf_block_reason = f"HTF Alignment (MODERATE) blocked SELL: H1={h1_trend}, M15={m15_trend} (opposing BULLISH trend)"
+
+            if htf_blocked:
+                candidate_side = TradeSide.HOLD
+
+        # -------------------------------------------------------------
         # D. Separate Risk Gates & Structured Decision Logic
         # -------------------------------------------------------------
         primary_reason = "NONE"
         secondary_reasons = []
+
+        if htf_blocked:
+            secondary_reasons.append(htf_block_reason)
 
         # 1. Spread Check Gate
         spread_passed = not spread_excessive
@@ -599,7 +666,7 @@ class DecisionEngine:
             if bullish_obs:
                 closest_ob = max(bullish_obs, key=lambda ob: ob.bottom)
                 ob_sl_dist = entry_price - closest_ob.bottom + (10 * point)
-                if base_sl_distance <= ob_sl_dist <= 250 * point:
+                if base_sl_distance <= ob_sl_dist <= max(250 * point, atr * 3.0):
                     sl_distance = ob_sl_dist
         elif candidate_side == TradeSide.SELL:
             entry_price = ticker.bid
@@ -607,7 +674,7 @@ class DecisionEngine:
             if bearish_obs:
                 closest_ob = min(bearish_obs, key=lambda ob: ob.top)
                 ob_sl_dist = closest_ob.top - entry_price + (10 * point)
-                if base_sl_distance <= ob_sl_dist <= 250 * point:
+                if base_sl_distance <= ob_sl_dist <= max(250 * point, atr * 3.0):
                     sl_distance = ob_sl_dist
 
         tp_distance = sl_distance * required_rr
@@ -658,7 +725,9 @@ class DecisionEngine:
         # Determine Final Decision & Structured Primary Reason
         final_decision = TradeSide.HOLD
 
-        if not spread_passed:
+        if htf_blocked:
+            primary_reason = "HTF_ALIGNMENT_BLOCKED"
+        elif not spread_passed:
             primary_reason = "SPREAD_BLOCKED"
         elif not news_passed:
             primary_reason = "NEWS_BLOCKED"
@@ -671,11 +740,13 @@ class DecisionEngine:
         else:
             if len(active_setups) == 0:
                 primary_reason = "NO_SETUP"
+                secondary_reasons.append("Scanning live market structure & indicators for qualified setup...")
             elif max(LONG_SCORE, SHORT_SCORE) < min_conf_required:
                 primary_reason = "LOW_CONFIDENCE"
-                secondary_reasons.append(f"Highest score {round(max(LONG_SCORE, SHORT_SCORE)*100,1)}% < required {round(min_conf_required*100,1)}% ({regime} threshold)")
+                secondary_reasons.append(f"Signal score {round(max(LONG_SCORE, SHORT_SCORE)*100,1)}% is below required {round(min_conf_required*100,1)}% threshold ({regime})")
             else:
                 primary_reason = "NO_SETUP"
+                secondary_reasons.append("Scanning live market structure & indicators for qualified setup...")
 
         active_score = LONG_SCORE if candidate_side == TradeSide.BUY else (SHORT_SCORE if candidate_side == TradeSide.SELL else max(LONG_SCORE, SHORT_SCORE))
 
@@ -825,7 +896,7 @@ class DecisionEngine:
             risk_reward_ratio=rr_ratio,
             breakdown=breakdown,
             condition_matrix=condition_matrix,
-            htf_alignment={"H1": h1_trend},
+            htf_alignment={"H1": h1_trend, "H4": h4_trend},
             candlestick_pattern=f"{pattern_name} ({pattern_bias})",
             liquidity_status=liquidity_status,
             estimated_holding_bars=6,

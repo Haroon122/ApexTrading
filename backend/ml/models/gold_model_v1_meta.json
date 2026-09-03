@@ -1,0 +1,35 @@
+{
+    "version": "gold_model_v1",
+    "timestamp": "2026-09-02T22:39:50.631184",
+    "broker": "MetaQuotes-MT5",
+    "symbol": "XAUUSD",
+    "date_range": "2026-08-23 12:52:36.991674 to 2026-09-02 22:38:36.991674",
+    "features": [
+        "RSI_14",
+        "Stoch_RSI_K",
+        "MACD_Hist_Norm",
+        "ADX_Trend_Strength",
+        "Relative_Volume",
+        "EMA_20_50_Spread",
+        "EMA_50_200_Spread",
+        "Dist_to_VWAP",
+        "M5_Trend",
+        "M15_Trend",
+        "H1_Trend"
+    ],
+    "test_metrics": {
+        "xgboost": {
+            "accuracy": 0.303475935828877,
+            "precision": 0.3269985678205112,
+            "recall": 0.3343026721373998,
+            "f1": 0.1763014193492296
+        },
+        "lightgbm": {
+            "accuracy": 0.30314171122994654,
+            "precision": 0.20205775224362585,
+            "recall": 0.3347694614155807,
+            "f1": 0.1618892671004482
+        }
+    },
+    "model_type": "xgboost"
+}

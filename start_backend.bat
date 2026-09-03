@@ -13,12 +13,12 @@ echo   ApexTrader AI - Production MT5 Trading Bot
 echo  ============================================================
 echo   Backend:   http://localhost:8000
 echo   API Docs:  http://localhost:8000/docs
-echo   Dashboard: Open frontend\index.html in browser
+echo   Dashboard: http://localhost:8000/frontend/index.html
 echo  ============================================================
 echo.
 
 cd /d "%BACKEND_DIR%"
-"%PYTHON%" -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+"%PYTHON%" -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 echo.
 echo [Server stopped]

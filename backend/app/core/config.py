@@ -38,6 +38,24 @@ class Settings(BaseSettings):
     ENABLE_SESSION_FILTER: bool = False
     ALLOWED_SESSIONS: List[str] = ["ASIAN", "LONDON", "NEWYORK", "LONDON_NY_OVERLAP"]
 
+    # Feature Flags
+    # ---------------------------------------------------------------------------
+    # Enable the live Forex Factory economic calendar provider.
+    # Set to False if the feed becomes unavailable; the news filter will fall
+    # back to UNKNOWN (non-blocking) mode without a code change.
+    LIVE_NEWS_CALENDAR_ENABLED: bool = Field(default=True, env="LIVE_NEWS_CALENDAR_ENABLED")
+
+    # Setup C (Liquidity Sweep Reversal) — disabled due to negative expectancy
+    # (65 combined trades, both datasets negative). Re-enable only after rework.
+    SETUP_C_LIQUIDITY_SWEEP_ENABLED: bool = Field(default=False, env="SETUP_C_LIQUIDITY_SWEEP_ENABLED")
+
+    # Hard HTF (H1 + M15) Alignment Filter (Default False for live compatibility)
+    HTF_ALIGNMENT_FILTER_ENABLED: bool = Field(default=False, env="HTF_ALIGNMENT_FILTER_ENABLED")
+    HTF_ALIGNMENT_MODE: str = Field(default="MODERATE", env="HTF_ALIGNMENT_MODE")
+
+    # Disabled Setups List for dynamic pruning
+    DISABLED_SETUPS: List[str] = Field(default_factory=list)
+
 
     # Risk Management Parameters
     MAX_RISK_PER_TRADE_PCT: float = Field(default=1.0, env="MAX_RISK_PER_TRADE_PCT")  # 1% equity
@@ -48,7 +66,7 @@ class Settings(BaseSettings):
     MAX_OPEN_TRADES: int = Field(default=5, env="MAX_OPEN_TRADES")
     MAX_OPEN_POSITIONS: int = Field(default=5, env="MAX_OPEN_POSITIONS")
     ENABLE_BREAK_EVEN: bool = True
-    BREAK_EVEN_AT_RR: float = 1.0
+    BREAK_EVEN_AT_RR: float = 0.5
     ENABLE_TRAILING_STOP: bool = True
     TRAILING_STOP_ATR_MULT: float = 1.5
     MAX_SPREAD_PIPS: float = 2.5

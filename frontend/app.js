@@ -211,6 +211,19 @@ async function setTimeframe(tf) {
     renderFinancialChart();
     addAuditEntry(`[TIMEFRAME] Synchronized chart timeframe to ${target} (${TIMEFRAMES[target].title}) — ${candles.length} candles rendered`, "var(--accent-cyan)");
   }
+
+  // 6. Automatically synchronize active entry timeframe in Risk Settings & Trading Worker
+  if (state.riskSettings) {
+    state.riskSettings.entry_timeframe = target;
+  }
+  if (el("auto-trade-live-tf-badge")) {
+    el("auto-trade-live-tf-badge").textContent = `RUNNING (${target})`;
+  }
+
+  await apiFetch("/api/v1/settings/risk", "POST", {
+    ...(state.riskSettings || {}),
+    entry_timeframe: target
+  });
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -265,7 +278,15 @@ function handleWSPayload(data) {
     state.lastSequenceNumber = data.sequence;
   }
 
-  if (data.bot_status) updateBotStatusUI(data.bot_status, data.engine_state, data.engine_reason);
+  let liveReason = data.auto_trade_live_reason;
+  if (!liveReason && data.decision_report && data.decision_report.decision === "HOLD") {
+    const rej = data.decision_report.rejection_reasons;
+    if (rej && rej.length > 0 && rej[0] !== "NONE") {
+      liveReason = `Trade Held: Strategy decision is HOLD. Rejection reasons: ${rej.join(", ")}`;
+    }
+  }
+
+  updateBotStatusUI(data.bot_status, data.engine_state, data.engine_reason, liveReason);
   if (data.ticker) updateTicker(data.ticker);
   if (data.account) updateAccount(data.account);
   if (data.candles && data.candles.length > 0) {
@@ -287,23 +308,31 @@ function handleWSPayload(data) {
   }
   if (data.decision_report) updateDecisionReport(data.decision_report);
   if (data.risk_settings) updateRiskSettingsUI(data.risk_settings, false);
+  if (data.auto_trade_hold_event) {
+    const ev = data.auto_trade_hold_event;
+    if (ev.event_id && ev.event_id !== lastAutoTradeEventId) {
+      lastAutoTradeEventId = ev.event_id;
+      showAutoTradeHoldPopup(ev.signal, ev.reason, 4000);
+    }
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
 //  UI UPDATERS
 // ─────────────────────────────────────────────────────────────
-function updateBotStatusUI(status, engineState, engineReason) {
+let lastRecordedAutoTradeReason = "";
+
+function updateBotStatusUI(status, engineState, engineReason, autoTradeLiveReason = null) {
   state.botStatus = status;
   const badge = el("bot-status-badge");
   if (!badge) return;
 
   let displayStatus = engineState || status;
-  if (engineReason) {
-    displayStatus += ` — ${engineReason}`;
-  }
   badge.textContent = displayStatus;
 
   const baseState = engineState || status;
+  const isAutoRunning = (status === "RUNNING" || ["RUNNING", "ANALYZING", "SIGNAL_READY", "EXECUTING", "POSITION_OPEN", "MANAGING_POSITION", "EXITING"].includes(baseState));
+
   badge.className = "badge-bot-status " + (
     baseState === "RUNNING" ? "status-running" :
     baseState === "PAUSED" ? "status-paused" :
@@ -311,6 +340,52 @@ function updateBotStatusUI(status, engineState, engineReason) {
     baseState === "ERROR" ? "status-emergency" :
     ["ANALYZING", "SIGNAL_READY", "EXECUTING", "POSITION_OPEN", "MANAGING_POSITION", "EXITING"].includes(baseState) ? "status-running" : "status-stopped"
   );
+
+  const liveBanner = el("auto-trade-live-status-banner");
+  const liveReasonEl = el("auto-trade-live-reason");
+  const liveBadge = el("auto-trade-live-tf-badge");
+  const sidebarContainer = el("sidebar-auto-trade-reason-container");
+  const sidebarReasonEl = el("sidebar-auto-trade-reason");
+
+  const activeReason = autoTradeLiveReason || engineReason || "Scanning live market structure and indicators...";
+  const tfStr = state.timeframe || "M15";
+
+  if (isAutoRunning) {
+    if (liveBanner && liveReasonEl) {
+      liveReasonEl.textContent = activeReason;
+      if (liveBadge) liveBadge.textContent = `RUNNING (${tfStr})`;
+      liveBanner.classList.remove("hidden");
+
+      // Dynamic Severity Accent Colors & Icon Styling
+      const iconContainer = liveBanner.querySelector(".trade-alert-icon");
+      if (activeReason.includes("Trade Blocked") || activeReason.includes("AI Execution Blocked") || activeReason.includes("Circuit Breaker") || activeReason.includes("High Spread") || activeReason.includes("Risk Guard")) {
+        liveBanner.style.borderLeftColor = "#ef4444";
+        liveBanner.style.boxShadow = "0 0 15px rgba(239, 68, 68, 0.2)";
+        if (iconContainer) iconContainer.style.color = "#ef4444";
+      } else if (activeReason.includes("Executing Trade") || activeReason.includes("Position Active")) {
+        liveBanner.style.borderLeftColor = "#10b981";
+        liveBanner.style.boxShadow = "0 0 15px rgba(16, 185, 129, 0.2)";
+        if (iconContainer) iconContainer.style.color = "#10b981";
+      } else {
+        liveBanner.style.borderLeftColor = "#f59e0b";
+        liveBanner.style.boxShadow = "0 0 15px rgba(245, 158, 11, 0.15)";
+        if (iconContainer) iconContainer.style.color = "#f59e0b";
+      }
+    }
+    if (sidebarContainer && sidebarReasonEl) {
+      sidebarReasonEl.textContent = activeReason;
+      sidebarContainer.classList.remove("hidden");
+    }
+
+    if (activeReason && activeReason !== lastRecordedAutoTradeReason) {
+      lastRecordedAutoTradeReason = activeReason;
+      const logColor = (activeReason.includes("Trade Blocked") || activeReason.includes("AI Execution Blocked")) ? "var(--accent-red)" : (activeReason.includes("Executing") ? "var(--accent-emerald)" : "var(--accent-amber)");
+      addAuditEntry(`[AUTO-TRADE RUNTIME STATUS] (${tfStr}) → ${activeReason}`, logColor);
+    }
+  } else {
+    if (liveBanner) liveBanner.classList.add("hidden");
+    if (sidebarContainer) sidebarContainer.classList.add("hidden");
+  }
 }
 
 function updateTicker(t) {
@@ -475,10 +550,11 @@ function updateRiskSettingsUI(cfg, forceModalUpdate = true) {
     if (el("cfg-trading-mode")) el("cfg-trading-mode").value = cfg.trading_mode_profile ?? "BALANCED";
     if (el("cfg-strategy-profile")) el("cfg-strategy-profile").value = cfg.strategy_profile ?? "HYBRID_AUTO";
     if (el("cfg-signal-mode")) el("cfg-signal-mode").value = cfg.signal_mode ?? "CLOSED_CANDLE";
+    if (el("cfg-entry-confirmation-mode")) el("cfg-entry-confirmation-mode").value = cfg.entry_confirmation_mode ?? "IMMEDIATE";
     if (el("cfg-bb-period")) el("cfg-bb-period").value = cfg.bb_period ?? 20;
     if (el("cfg-bb-std")) el("cfg-bb-std").value = cfg.bb_std ?? 2.0;
-    if (el("cfg-lot-mode")) el("cfg-lot-mode").value = cfg.lot_sizing_mode ?? "FIXED";
-    if (el("cfg-user-lot")) el("cfg-user-lot").value = cfg.user_configured_lot ?? 0.10;
+    if (el("cfg-lot-mode")) el("cfg-lot-mode").value = cfg.lot_sizing_mode ?? "DYNAMIC_RISK";
+    if (el("cfg-user-lot")) el("cfg-user-lot").value = cfg.user_configured_lot ?? 0.01;
     if (el("cfg-max-allowed-lot")) el("cfg-max-allowed-lot").value = cfg.max_allowed_lot ?? 1.00;
     el("cfg-max-risk").value = cfg.max_risk_per_trade_pct ?? 1.0;
     if (el("cfg-min-rr")) el("cfg-min-rr").value = String(cfg.min_risk_reward_ratio ?? 2.0);
@@ -486,11 +562,11 @@ function updateRiskSettingsUI(cfg, forceModalUpdate = true) {
     if (el("cfg-weekly-loss")) el("cfg-weekly-loss").value = cfg.weekly_loss_limit_pct ?? 7.0;
     if (el("cfg-max-daily-loss-amt")) el("cfg-max-daily-loss-amt").value = cfg.max_daily_loss_amount ?? 500;
     el("cfg-max-positions").value = cfg.max_open_positions ?? 5;
-    el("cfg-default-lot").value = cfg.default_lot_size ?? 0.1;
+    el("cfg-default-lot").value = cfg.default_lot_size ?? 0.01;
     if (el("cfg-auto-breakeven")) el("cfg-auto-breakeven").value = String(cfg.auto_breakeven_enabled !== false);
     if (el("cfg-auto-trailing")) el("cfg-auto-trailing").value = String(cfg.auto_trailing_stop_enabled !== false);
     el("cfg-trailing-pips").value = cfg.trailing_stop_pips ?? 15;
-    if (el("cfg-trailing-activation-rr")) el("cfg-trailing-activation-rr").value = cfg.trailing_activation_rr ?? 1.2;
+    if (el("cfg-trailing-activation-rr")) el("cfg-trailing-activation-rr").value = cfg.trailing_activation_rr ?? 0.6;
     if (el("cfg-trailing-atr-mult")) el("cfg-trailing-atr-mult").value = cfg.trailing_atr_multiplier ?? 2.0;
     el("cfg-min-confidence").value = cfg.min_ai_confidence ?? 0.70;
     if (el("cfg-auto-trade-enabled")) el("cfg-auto-trade-enabled").value = String(cfg.auto_trade_enabled);
@@ -503,6 +579,11 @@ function updateRiskSettingsUI(cfg, forceModalUpdate = true) {
 
   // Update Live Risk Monitor Sidebar Card Badges
   if (el("risk-mode-badge")) el("risk-mode-badge").textContent = (cfg.trading_mode_profile ?? "BALANCED").toUpperCase();
+  if (el("risk-entry-confirm-badge")) {
+    const isImm = (cfg.entry_confirmation_mode ?? "IMMEDIATE") === "IMMEDIATE";
+    el("risk-entry-confirm-badge").textContent = isImm ? "IMMEDIATE" : "NEXT CANDLE";
+    el("risk-entry-confirm-badge").className = isImm ? "text-emerald" : "text-cyan";
+  }
   if (el("risk-lot-mode-badge")) el("risk-lot-mode-badge").textContent = (cfg.lot_sizing_mode ?? "FIXED").toUpperCase();
   if (el("risk-target-vol-badge")) {
     const isFixed = (cfg.lot_sizing_mode ?? "FIXED") === "FIXED";
@@ -1489,6 +1570,15 @@ const RISK_HELP_DICTIONARY = {
     limit: "Unconfirmed candle signals are ignored until the bar closes in CLOSED_CANDLE mode.",
     example: "In CLOSED_CANDLE mode, an RSI overbought alert mid-candle will wait until the 15-minute bar closes before opening a trade."
   },
+  "cfg-entry-confirmation-mode": {
+    title: "Entry Confirmation Mechanism",
+    summary: "Configures whether signals execute immediately or wait for the NEXT candle close confirmation to prevent immediate-reversal losses.",
+    increase: "<strong>CONFIRM NEXT CANDLE:</strong> Waits 1 candle delay (~1m M1, ~5m M5, ~15m M15) and requires next candle close to hold direction.",
+    decrease: "<strong>IMMEDIATE:</strong> Default mode — executes trade immediately when signal fires.",
+    execution: "Re-validates setup parameters at CURRENT market price upon confirmation candle close before order placement.",
+    limit: "If next candle reverses against signal direction, or if spread widens/news blackout occurs, trade is cancelled.",
+    example: "With CONFIRM_NEXT_CANDLE on M5, a BUY signal waits 5 minutes; if the next candle closes bullish, order parameters are re-calculated at current price and executed."
+  },
   "cfg-lot-mode": {
     title: "Position Sizing Mode",
     summary: "Controls how trade volume (lots) is calculated—either static user-defined FIXED lots or DYNAMIC RISK based on Stop Loss distance.",
@@ -1928,6 +2018,8 @@ function initControls() {
       trading_mode_profile: el("cfg-trading-mode") ? el("cfg-trading-mode").value : "BALANCED",
       strategy_profile: el("cfg-strategy-profile") ? el("cfg-strategy-profile").value : "HYBRID_AUTO",
       signal_mode: el("cfg-signal-mode") ? el("cfg-signal-mode").value : "CLOSED_CANDLE",
+      entry_timeframe: state.timeframe || (state.riskSettings ? state.riskSettings.entry_timeframe : "M15"),
+      entry_confirmation_mode: el("cfg-entry-confirmation-mode") ? el("cfg-entry-confirmation-mode").value : "IMMEDIATE",
       bb_period: getInt("cfg-bb-period", 20),
       bb_std: getFloat("cfg-bb-std", 2.0),
       lot_sizing_mode: el("cfg-lot-mode") ? el("cfg-lot-mode").value : "FIXED",
@@ -2015,11 +2107,11 @@ function initControls() {
   el("btn-manual-sell").addEventListener("click", () => executeManualTrade("SELL"));
 
   el("btn-lot-minus").addEventListener("click", () => {
-    let l = Math.max(0.01, parseFloat(el("manual-lots").value) - 0.05);
+    let l = Math.max(0.01, parseFloat(el("manual-lots").value) - 0.01);
     el("manual-lots").value = l.toFixed(2);
   });
   el("btn-lot-plus").addEventListener("click", () => {
-    let l = parseFloat(el("manual-lots").value) + 0.05;
+    let l = parseFloat(el("manual-lots").value) + 0.01;
     el("manual-lots").value = l.toFixed(2);
   });
 
@@ -2488,8 +2580,7 @@ async function loadMlModels() {
   }
 
   tbody.innerHTML = models.map(m => {
-    // If no active version is set yet in riskSettings, treat the first one as inactive
-    const isBest = state.riskSettings && state.riskSettings.active_model_version === m.version;
+    const isBest = m.is_active === true || (state.riskSettings && state.riskSettings.active_model_version === m.version);
     const f1 = m.test_metrics && m.test_metrics.xgboost ? m.test_metrics.xgboost.f1 : (m.test_metrics && m.test_metrics.lightgbm ? m.test_metrics.lightgbm.f1 : (m.test_metrics && m.test_metrics.f1 ? m.test_metrics.f1 : 0.0));
     const acc = m.test_metrics && m.test_metrics.xgboost ? m.test_metrics.xgboost.accuracy : (m.test_metrics && m.test_metrics.lightgbm ? m.test_metrics.lightgbm.accuracy : (m.test_metrics && m.test_metrics.accuracy ? m.test_metrics.accuracy : 0.0));
     
@@ -2659,6 +2750,11 @@ async function bootstrap() {
 
   async function syncDashboardData() {
     try {
+      const botStatus = await apiFetch("/api/v1/bot/status");
+      if (botStatus) {
+        updateBotStatusUI(botStatus.status, botStatus.engine_state, botStatus.engine_reason, botStatus.auto_trade_live_reason);
+      }
+
       const acc = await apiFetch("/api/v1/account");
       if (acc) updateAccount(acc);
       
@@ -2709,7 +2805,91 @@ async function bootstrap() {
 
   startAutoAnalysisScheduler();
 
+  const popupCloseBtn = el("popup-close-btn");
+  if (popupCloseBtn) {
+    popupCloseBtn.addEventListener("click", hideAutoTradeHoldPopup);
+  }
+
   addAuditEntry("[SYSTEM] Initialization complete. Live MT5 synchronization engine active.", "var(--accent-emerald)");
+}
+
+// ─────────────────────────────────────────────────────────────
+//  AUTO-TRADE HELD / REJECTED 4-SECOND POPUP MANAGER
+// ─────────────────────────────────────────────────────────────
+let autoTradePopupTimer = null;
+let lastAutoTradeEventId = "";
+
+function showAutoTradeHoldPopup(signal, reason, durationMs = 4000) {
+  const container = el("auto-trade-popup-container");
+  const card = el("auto-trade-popup-card");
+  const badge = el("popup-signal-badge");
+  const reasonText = el("popup-reason-text");
+  const progressBar = el("popup-progress-bar");
+
+  if (!container || !card || !reasonText || !progressBar) return;
+
+  if (autoTradePopupTimer) {
+    clearTimeout(autoTradePopupTimer);
+    autoTradePopupTimer = null;
+  }
+
+  const sigUpper = (signal || "SIGNAL").toUpperCase();
+  if (badge) {
+    badge.textContent = `${sigUpper} SIGNAL`;
+    if (sigUpper === "BUY") {
+      badge.className = "popup-signal-badge badge-buy";
+    } else if (sigUpper === "SELL") {
+      badge.className = "popup-signal-badge badge-sell";
+    } else {
+      badge.className = "popup-signal-badge";
+    }
+  }
+
+  const titleEl = document.querySelector("#auto-trade-popup-card .popup-title");
+  if (titleEl) {
+    if (reason && (reason.includes("Circuit Breaker") || reason.includes("Daily Loss"))) {
+      titleEl.textContent = "CIRCUIT BREAKER TRIGGERED";
+    } else if (reason && (reason.includes("Next-candle") || reason.includes("confirmation") || reason.includes("delay") || reason.includes("Trade held"))) {
+      titleEl.textContent = "ENTRY CONFIRMATION HELD";
+    } else {
+      titleEl.textContent = "AUTO-TRADE EXECUTION BLOCKED";
+    }
+  }
+
+  reasonText.textContent = reason || "Trade cannot be executed automatically due to backend limitations or risk controls.";
+
+  card.classList.remove("popup-hide");
+  container.classList.remove("hidden");
+
+  progressBar.classList.remove("animate-4s");
+  void progressBar.offsetWidth;
+  progressBar.classList.add("animate-4s");
+
+  addAuditEntry(`[AUTO-TRADE POPUP] (${sigUpper} Signal Held/Rejected) ${reason}`, "var(--accent-amber)");
+
+  autoTradePopupTimer = setTimeout(() => {
+    hideAutoTradeHoldPopup();
+  }, durationMs);
+}
+
+function hideAutoTradeHoldPopup() {
+  const container = el("auto-trade-popup-container");
+  const card = el("auto-trade-popup-card");
+
+  if (autoTradePopupTimer) {
+    clearTimeout(autoTradePopupTimer);
+    autoTradePopupTimer = null;
+  }
+
+  if (card) {
+    card.classList.add("popup-hide");
+    setTimeout(() => {
+      if (container) container.classList.add("hidden");
+      card.classList.remove("popup-hide");
+    }, 300);
+  } else if (container) {
+    container.classList.add("hidden");
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
