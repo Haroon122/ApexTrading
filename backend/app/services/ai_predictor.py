@@ -6,6 +6,10 @@ import numpy as np
 
 logger = logging.getLogger("ApexTrader.AIPredictor")
 
+# Deployment Quality Gate Constants
+MIN_ACCEPTABLE_F1 = 0.45
+MIN_ACCEPTABLE_ACCURACY = 0.40
+
 class AIPredictor:
     _instance = None
     
@@ -23,6 +27,7 @@ class AIPredictor:
         self.active_model_version: Optional[str] = None
         self.model: Any = None
         self.feature_columns: list = []
+        self.last_error_reason: str = ""
         self._initialized = True
         self.load_active_model()
         
@@ -77,22 +82,52 @@ class AIPredictor:
         models.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
         return models
         
-    def activate_model(self, version: str) -> bool:
+    def activate_model(self, version: str, force: bool = False) -> bool:
         """
         Loads the model file and metadata for a specific version.
+        If force=True, bypasses Quality Gate Check metrics threshold.
         """
+        self.last_error_reason = ""
         meta_path = os.path.join(self.models_dir, f"{version}_meta.json")
         model_path = os.path.join(self.models_dir, f"{version}.bin")
         
         if not os.path.exists(meta_path) or not os.path.exists(model_path):
-            logger.warning(f"[AI PREDICTOR] Model files for {version} do not exist.")
+            self.last_error_reason = f"Model files for version '{version}' do not exist on server."
+            logger.warning(f"[AI PREDICTOR] {self.last_error_reason}")
+            self.model = None
+            self.active_model_version = None
+            self.feature_columns = []
             return False
             
         try:
             with open(meta_path, "r") as f:
                 meta = json.load(f)
-            self.feature_columns = meta.get("features", [])
+
+            # Quality Gate Check
             model_type = meta.get("model_type", "xgboost")
+            metrics = meta.get("walk_forward_metrics", meta.get("test_metrics", {}))
+            type_metrics = metrics.get(model_type, metrics) if isinstance(metrics, dict) else {}
+            f1 = float(type_metrics.get("mean_f1", type_metrics.get("f1", 0.0)))
+            acc = float(type_metrics.get("mean_accuracy", type_metrics.get("accuracy", 0.0)))
+
+            if (f1 < MIN_ACCEPTABLE_F1 or acc < MIN_ACCEPTABLE_ACCURACY) and not force:
+                self.last_error_reason = (
+                    f"Quality gate REJECTED model '{version}': "
+                    f"F1={f1:.4f} (min {MIN_ACCEPTABLE_F1}), Accuracy={acc:.4f} (min {MIN_ACCEPTABLE_ACCURACY})."
+                )
+                logger.warning(f"[AI PREDICTOR] {self.last_error_reason}")
+                self.model = None
+                self.active_model_version = None
+                self.feature_columns = []
+                return False
+
+            if force and (f1 < MIN_ACCEPTABLE_F1 or acc < MIN_ACCEPTABLE_ACCURACY):
+                logger.warning(
+                    f"[AI PREDICTOR] Quality gate BYPASSED for model '{version}' (force=True): "
+                    f"F1={f1:.4f}, Accuracy={acc:.4f}."
+                )
+
+            self.feature_columns = meta.get("features", [])
             
             if model_type == "xgboost":
                 import xgboost as xgb
@@ -102,7 +137,8 @@ class AIPredictor:
                 import lightgbm as lgb
                 self.model = lgb.Booster(model_file=model_path)
             else:
-                logger.error(f"[AI PREDICTOR] Unsupported model type: {model_type}")
+                self.last_error_reason = f"Unsupported model type: {model_type}"
+                logger.error(f"[AI PREDICTOR] {self.last_error_reason}")
                 return False
                 
             self.active_model_version = version
@@ -120,7 +156,8 @@ class AIPredictor:
             logger.info(f"[AI PREDICTOR] Successfully activated model version: {version} ({model_type})")
             return True
         except Exception as e:
-            logger.error(f"[AI PREDICTOR] Failed to activate model version {version}: {e}", exc_info=True)
+            self.last_error_reason = f"Failed to activate model version {version}: {str(e)}"
+            logger.error(f"[AI PREDICTOR] {self.last_error_reason}", exc_info=True)
             self.model = None
             self.feature_columns = []
             return False

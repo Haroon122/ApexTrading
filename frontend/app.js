@@ -566,7 +566,7 @@ function updateRiskSettingsUI(cfg, forceModalUpdate = true) {
     if (el("cfg-auto-breakeven")) el("cfg-auto-breakeven").value = String(cfg.auto_breakeven_enabled !== false);
     if (el("cfg-auto-trailing")) el("cfg-auto-trailing").value = String(cfg.auto_trailing_stop_enabled !== false);
     el("cfg-trailing-pips").value = cfg.trailing_stop_pips ?? 15;
-    if (el("cfg-trailing-activation-rr")) el("cfg-trailing-activation-rr").value = cfg.trailing_activation_rr ?? 0.6;
+    if (el("cfg-trailing-activation-rr")) el("cfg-trailing-activation-rr").value = cfg.trailing_activation_rr ?? 1.2;
     if (el("cfg-trailing-atr-mult")) el("cfg-trailing-atr-mult").value = cfg.trailing_atr_multiplier ?? 2.0;
     el("cfg-min-confidence").value = cfg.min_ai_confidence ?? 0.70;
     if (el("cfg-auto-trade-enabled")) el("cfg-auto-trade-enabled").value = String(cfg.auto_trade_enabled);
@@ -597,7 +597,8 @@ function updateRiskSettingsUI(cfg, forceModalUpdate = true) {
   if (el("risk-weekly-limit-badge")) el("risk-weekly-limit-badge").textContent = `${cfg.weekly_loss_limit_pct ?? 7.0}% Balance`;
   if (el("risk-be-badge")) {
     const beActive = cfg.auto_breakeven_enabled !== false;
-    el("risk-be-badge").textContent = beActive ? "Active @ 1.0R" : "Disabled";
+    const beVal = cfg.break_even_rr ?? 1.0;
+    el("risk-be-badge").textContent = beActive ? `Active @ ${beVal}R` : "Disabled";
     el("risk-be-badge").className = beActive ? "text-emerald" : "text-muted";
   }
   if (el("risk-trailing-badge")) {
@@ -2600,9 +2601,11 @@ async function loadMlModels() {
   }).join("");
 }
 
-async function activateMlModel(version) {
-  addAuditEntry(`[ML] Activating model version: ${version}...`, "var(--accent-cyan)");
-  const res = await apiFetch(`/api/v1/ml/models/activate?version=${version}`, "POST");
+async function activateMlModel(version, force = false) {
+  addAuditEntry(`[ML] Activating model version: ${version}${force ? ' (FORCE OVERRIDE)' : ''}...`, "var(--accent-cyan)");
+  let url = `/api/v1/ml/models/activate?version=${version}`;
+  if (force) url += "&force=true";
+  const res = await apiFetch(url, "POST");
   if (res && res.success) {
     addAuditEntry(`[ML] ${res.message}`, "var(--accent-emerald)");
     
@@ -2613,6 +2616,12 @@ async function activateMlModel(version) {
     await loadMlModels();
   } else {
     addAuditEntry(`[ML] Failed to activate model version: ${version}`, "var(--accent-red)");
+    if (!force) {
+      const confirmForce = confirm(`Model Quality Gate Rejected '${version}'.\n\nIts performance metrics (F1 / Accuracy) are below the minimum acceptable quality threshold (F1 >= 45%, Accuracy >= 40%).\n\nDo you want to FORCE activate this model anyway?`);
+      if (confirmForce) {
+        await activateMlModel(version, true);
+      }
+    }
   }
 }
 window.activateMlModel = activateMlModel;

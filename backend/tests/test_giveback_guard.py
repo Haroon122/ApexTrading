@@ -70,7 +70,7 @@ class TestRiskSettingsDefaults:
         assert rs.giveback_guard_retrace_pct == pytest.approx(50.0)
 
     def test_updated_thresholds(self):
-        """Check that the new scalper thresholds are the defaults."""
+        """Check that default thresholds match RiskSettings model."""
         rs = RiskSettings()
         assert rs.break_even_rr == pytest.approx(1.0), "break_even_rr should default to 1.0"
         assert rs.trailing_activation_rr == pytest.approx(1.2), "trailing_activation_rr should default to 1.2"

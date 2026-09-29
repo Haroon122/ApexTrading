@@ -614,13 +614,15 @@ def get_ml_models() -> List[Dict[str, Any]]:
 
 
 @router.post("/ml/models/activate", dependencies=[Depends(verify_api_key)])
-def activate_ml_model(version: str = Query(...)) -> Dict[str, Any]:
+def activate_ml_model(version: str = Query(...), force: bool = Query(default=False)) -> Dict[str, Any]:
     """
     Activates a specific version of the machine learning model.
+    Pass force=true to override deployment quality gate checks.
     """
-    success = ai_predictor.activate_model(version)
+    success = ai_predictor.activate_model(version, force=force)
     if not success:
-        raise HTTPException(status_code=400, detail=f"Failed to activate model version '{version}'. Check server logs.")
+        reason = getattr(ai_predictor, "last_error_reason", "") or f"Failed to activate model version '{version}'. Check server logs."
+        raise HTTPException(status_code=400, detail=reason)
     return {
         "success": True,
         "message": f"Successfully activated model version: {version}",

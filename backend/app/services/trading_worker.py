@@ -27,9 +27,16 @@ class GoldTradingWorker:
         self.last_payload: Dict[str, Any] = {}
         self.symbol: str = "XAUUSD"  # Will be set to discovered symbol on start/checks
         self.timeframe: str = getattr(getattr(trade_manager, "risk_settings", None), "entry_timeframe", "M1")
-        self.pending_confirmation: Optional[Dict[str, Any]] = None
         self.state: EngineState = EngineState.STOPPED
         self.status_reason: str = "Bot stopped by user."
+
+    @property
+    def pending_confirmation(self) -> Optional[Dict[str, Any]]:
+        return trade_manager.pending_confirmation
+
+    @pending_confirmation.setter
+    def pending_confirmation(self, value: Optional[Dict[str, Any]]):
+        trade_manager.pending_confirmation = value
 
     async def run_pre_flight_checks(self) -> Tuple[bool, str]:
         # 0. Discover Gold Symbol
@@ -172,6 +179,7 @@ class GoldTradingWorker:
                 if configured_tf and configured_tf.upper() in VALID_TIMEFRAMES and self.timeframe != configured_tf.upper():
                     logger.info(f"[TRADING WORKER] Dynamic timeframe change detected: switching active entry timeframe from {self.timeframe} to {configured_tf.upper()}")
                     self.timeframe = configured_tf.upper()
+                    self.pending_confirmation = None # Clear stale pending confirmation from previous timeframe
 
                 # 1. Fetch live market ticker and multi-timeframe candles
                 ticker = mt5_adapter.get_ticker(self.symbol)
@@ -203,25 +211,25 @@ class GoldTradingWorker:
                 can_trade, reason = trade_manager.can_auto_trade()
                 logger.info(f"[AUTO LOOP] cycle #{self._sequence_num} at {datetime.now()}, symbol={self.symbol}, timeframe={self.timeframe}, can_auto_trade={can_trade}, reason={reason}")
                 
-                # 2. Evaluate Single Authoritative AI Execution Pipeline
-                res = trade_manager.evaluate_and_execute_pipeline(self.symbol, self.timeframe, force_execution=False)
-                report = res.get("report")
-                if not report:
-                    report = decision_engine.evaluate_trade_opportunity(self.symbol, candles, ticker, self.timeframe, htf_candles=htf_candles)
-                
-                # Entry Confirmation Mechanism (IMMEDIATE vs CONFIRM_NEXT_CANDLE)
+                # Entry Confirmation Gate & Execution Pipeline Evaluation
                 confirm_mode = getattr(trade_manager.risk_settings, "entry_confirmation_mode", "IMMEDIATE")
                 if confirm_mode == "CONFIRM_NEXT_CANDLE":
-                    latest_closed = candles[-1] if candles[-1].is_closed else (candles[-2] if len(candles) >= 2 else candles[-1])
+                    latest_closed = candles[-1] if (candles and candles[-1].is_closed) else (candles[-2] if candles and len(candles) >= 2 else (candles[-1] if candles else None))
                     
                     if self.pending_confirmation is not None:
-                        pending_tf = self.pending_confirmation.get("timeframe")
+                        pending_tf = self.pending_confirmation.get("timeframe", self.timeframe)
+                        if pending_tf.upper() != self.timeframe.upper():
+                            logger.info(f"[TRADING WORKER] Timeframe switch detected ({pending_tf} vs active {self.timeframe}). Clearing pending confirmation.")
+                            self.pending_confirmation = None
+
+                    if self.pending_confirmation is not None:
+                        pending_tf = self.pending_confirmation.get("timeframe", self.timeframe)
                         pending_ts = self.pending_confirmation.get("signal_candle_ts")
                         pending_dir = self.pending_confirmation.get("direction")
                         pending_close = self.pending_confirmation.get("signal_close", 0.0)
                         
-                        if latest_closed.timestamp > pending_ts:
-                            atr_val = getattr(candles[-1], 'high', 0.0) - getattr(candles[-1], 'low', 0.0) or 0.30
+                        if latest_closed and latest_closed.timestamp > pending_ts:
+                            atr_val = getattr(latest_closed, 'high', 0.0) - getattr(latest_closed, 'low', 0.0) or 0.30
                             if pending_dir == "BUY":
                                 is_confirmed = (latest_closed.close >= pending_close - 0.2 * atr_val)
                             elif pending_dir == "SELL":
@@ -232,24 +240,43 @@ class GoldTradingWorker:
                             if not is_confirmed:
                                 logger.info(f"[ENTRY CONFIRMATION FAILED] {pending_dir} signal on {pending_tf} CANCELLED.")
                                 self.pending_confirmation = None
+                                report = decision_engine.evaluate_trade_opportunity(self.symbol, candles, ticker, self.timeframe, htf_candles=htf_candles)
                                 report.decision = TradeSide.HOLD
+                                res = {
+                                    "success": False,
+                                    "stage": "CONFIRMATION_FAILED",
+                                    "reason": f"Entry Confirmation Failed: {pending_dir} signal on {pending_tf} cancelled on next candle close.",
+                                    "report": report
+                                }
                             else:
                                 self.pending_confirmation = None
                                 logger.info(f"[ENTRY CONFIRMED & RE-VALIDATED] {pending_dir} signal CONFIRMED on {self.timeframe}.")
+                                res = trade_manager.evaluate_and_execute_pipeline(self.symbol, self.timeframe, force_execution=False, is_confirming_execution=True)
+                                report = res.get("report")
                         else:
+                            # Awaiting next candle close
+                            report = self.pending_confirmation.get("report")
+                            if not report:
+                                report = decision_engine.evaluate_trade_opportunity(self.symbol, candles, ticker, self.timeframe, htf_candles=htf_candles)
                             report.decision = TradeSide.HOLD
-                    elif report.decision != TradeSide.HOLD:
-                        self.pending_confirmation = {
-                            "symbol": self.symbol,
-                            "timeframe": self.timeframe,
-                            "direction": report.decision.value,
-                            "signal_candle_ts": latest_closed.timestamp,
-                            "signal_close": latest_closed.close,
-                            "report": report
-                        }
-                        report.decision = TradeSide.HOLD
+                            tf_mins = pending_tf[1:] if len(pending_tf) > 1 else "1"
+                            res = {
+                                "success": False,
+                                "stage": "AWAITING_CONFIRMATION",
+                                "reason": f"Trade Held [Confirmation Delay]: {pending_dir} signal pending on {pending_tf}. Awaiting next candle close confirmation (~{tf_mins} min delay).",
+                                "message": f"{pending_dir} signal pending on {pending_tf}.",
+                                "report": report
+                            }
+                    else:
+                        res = trade_manager.evaluate_and_execute_pipeline(self.symbol, self.timeframe, force_execution=False, is_confirming_execution=False)
+                        report = res.get("report")
                 else:
                     self.pending_confirmation = None
+                    res = trade_manager.evaluate_and_execute_pipeline(self.symbol, self.timeframe, force_execution=False)
+                    report = res.get("report")
+
+                if not report:
+                    report = decision_engine.evaluate_trade_opportunity(self.symbol, candles, ticker, self.timeframe, htf_candles=htf_candles)
 
                 # Authoritative position reconciliation & monitoring
                 trade_manager.update_open_positions(self.symbol)
@@ -273,10 +300,11 @@ class GoldTradingWorker:
                     live_hold_reason = f"Position Active: Monitoring {len(active_pos)} open position(s) for {self.symbol}."
                 elif self.pending_confirmation is not None:
                     pending_dir = self.pending_confirmation.get("direction", "SELL")
-                    tf_mins = self.timeframe[1:] if len(self.timeframe) > 1 else "1"
+                    pending_tf = self.pending_confirmation.get("timeframe", self.timeframe)
+                    tf_mins = pending_tf[1:] if len(pending_tf) > 1 else "1"
                     self.state = EngineState.RUNNING
-                    self.status_reason = f"WAITING_CONFIRMATION — {pending_dir} signal pending on {self.timeframe}. Awaiting next candle close confirmation (~{tf_mins} min delay)..."
-                    live_hold_reason = f"Trade Held [Confirmation Delay]: {pending_dir} signal pending on {self.timeframe}. Awaiting next candle close confirmation (~{tf_mins} min delay)."
+                    self.status_reason = f"WAITING_CONFIRMATION — {pending_dir} signal pending on {pending_tf}. Awaiting next candle close confirmation (~{tf_mins} min delay)..."
+                    live_hold_reason = f"Trade Held [Confirmation Delay]: {pending_dir} signal pending on {pending_tf}. Awaiting next candle close confirmation (~{tf_mins} min delay)."
                 else:
                     self.state = EngineState.RUNNING
                     self.status_reason = f"SCANNING_MARKET — {res['reason']}"

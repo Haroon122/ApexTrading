@@ -72,6 +72,9 @@ class Settings(BaseSettings):
     MAX_SPREAD_PIPS: float = 2.5
     ENABLE_LIVE_TRADING: bool = False
 
+    # ML Training Parameters
+    ML_TRAINING_LOOKBACK_DAYS: int = Field(default=180, env="ML_TRAINING_LOOKBACK_DAYS")
+
     # Heuristic Scoring Engine Parameters (Configured with backward-compatible AI parameter names)
     MIN_AI_CONFIDENCE: float = Field(default=0.70, env="MIN_AI_CONFIDENCE")  # 70% confidence required
     FEATURE_WINDOW_SIZE: int = 100

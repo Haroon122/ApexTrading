@@ -24,7 +24,7 @@
     "currency": "GBP",
     "leverage": "1:100",
     "terminal_path": "C:\\Program Files\\MetaTrader 5\\terminal64.exe",
-    "last_connected": "2026-08-19T19:32:25.949823",
+    "last_connected": "2026-09-08T12:31:10.384107",
     "is_active": true
   },
   "5055205585@MetaQuotes-Demo": {
@@ -38,7 +38,7 @@
     "currency": "USD",
     "leverage": "1:100",
     "terminal_path": "C:\\Program Files\\MetaTrader 5\\terminal64.exe",
-    "last_connected": "2026-09-02T21:29:18.986357",
+    "last_connected": "2026-09-07T17:32:45.547895",
     "is_active": true
   }
 }

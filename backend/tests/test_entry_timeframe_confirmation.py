@@ -9,9 +9,13 @@ Tests cover:
 5. Entry confirmation logic skipping/cancelling trade when next candle reverses against signal
 """
 
+import sys
+import os
 import pytest
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from app.domain.models import (
     Candle, TickerData, TradeSide, TradeDecisionReport, RiskSettings
@@ -230,3 +234,178 @@ class TestExecutionTimeRevalidation:
         # Execution-time report must reflect the CURRENT market ask price
         assert report_sig.suggested_entry == pytest.approx(2010.3)
         assert report_exec.suggested_entry == pytest.approx(2015.3)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. Integration Tests: Pipeline & Worker Loop Confirmation Enforcement
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestPipelineConfirmationIntegration:
+    @pytest.fixture(autouse=True)
+    def reset_state(self):
+        from app.domain.models import BotStatus
+        trade_manager.bot_status = BotStatus.RUNNING
+        trade_manager.pending_confirmation = None
+        trade_manager.update_risk_settings({
+            "entry_timeframe": "M1",
+            "entry_confirmation_mode": "CONFIRM_NEXT_CANDLE",
+            "auto_trade_enabled": True
+        })
+        yield
+        trade_manager.pending_confirmation = None
+        trade_manager.bot_status = BotStatus.STOPPED
+
+    def test_confirm_next_candle_prevents_immediate_execution_and_executes_on_confirmation(self):
+        worker = GoldTradingWorker()
+        candles_signal = _generate_test_candles(50, "M1", base_price=2000.0, trend="BULLISH")
+        ticker = _make_test_ticker("XAUUSD", bid=2010.0, ask=2010.15)
+        
+        # Force a BUY decision report
+        buy_report = decision_engine.evaluate_trade_opportunity("XAUUSD", candles_signal, ticker, "M1")
+        buy_report.decision = TradeSide.BUY
+
+        mock_account = MagicMock()
+        mock_account.is_connected = True
+        mock_account.balance = 10000.0
+        mock_account.equity = 10000.0
+        mock_account.daily_pnl_usd = 0.0
+        mock_account.weekly_pnl_usd = 0.0
+        mock_account.drawdown_pct = 0.0
+        mock_account.open_positions_count = 0
+
+        with patch("app.adapters.mt5_adapter.mt5_adapter.place_order", return_value=(True, MagicMock(trade_id="12345"), "Order placed")) as mock_place_order, \
+             patch("app.adapters.mt5_adapter.mt5_adapter.get_account_info", return_value=mock_account), \
+             patch("app.adapters.mt5_adapter.mt5_adapter.fetch_candles", return_value=candles_signal), \
+             patch("app.adapters.mt5_adapter.mt5_adapter.get_ticker", return_value=ticker), \
+             patch("app.adapters.mt5_adapter.mt5_adapter.get_positions", return_value=[]), \
+             patch("app.adapters.mt5_adapter.mt5_adapter.get_pending_orders", return_value=[]), \
+             patch("app.adapters.mt5_adapter.mt5_adapter.get_history", return_value=[]), \
+             patch.object(decision_engine, "evaluate_trade_opportunity", return_value=buy_report), \
+             patch.object(trade_manager, "_check_execution_safety", return_value=(True, "LIVE")):
+
+            # CYCLE 1: Signal candle is processed by evaluate_and_execute_pipeline
+            res1 = trade_manager.evaluate_and_execute_pipeline("XAUUSD", "M1")
+            
+            # Assert order was NOT placed on first cycle
+            mock_place_order.assert_not_called()
+            assert res1["success"] is False
+            assert res1["stage"] == "AWAITING_CONFIRMATION"
+            assert worker.pending_confirmation is not None
+            assert worker.pending_confirmation["direction"] == "BUY"
+
+            # CYCLE 2: Confirming next candle arrives
+            signal_ts = candles_signal[-1].timestamp
+            next_candle_ts = signal_ts + timedelta(minutes=1)
+            confirming_candle = Candle(
+                timestamp=next_candle_ts,
+                open=2010.0, high=2014.0, low=2009.9, close=2013.5,
+                volume=600.0, timeframe="M1", is_closed=True
+            )
+            candles_confirmed = candles_signal + [confirming_candle]
+
+            with patch("app.adapters.mt5_adapter.mt5_adapter.fetch_candles", return_value=candles_confirmed):
+                # Run worker loop iteration step for confirmation
+                res2 = trade_manager.evaluate_and_execute_pipeline("XAUUSD", "M1", is_confirming_execution=True)
+                assert res2["success"] is True
+                assert res2["stage"] == "EXECUTED"
+                mock_place_order.assert_called_once()
+
+    def test_confirm_next_candle_reversal_cancels_pending_without_executing(self):
+        worker = GoldTradingWorker()
+        candles_signal = _generate_test_candles(50, "M1", base_price=2000.0, trend="BULLISH")
+        ticker = _make_test_ticker("XAUUSD", bid=2010.0, ask=2010.15)
+
+        buy_report = decision_engine.evaluate_trade_opportunity("XAUUSD", candles_signal, ticker, "M1")
+        buy_report.decision = TradeSide.BUY
+
+        mock_account = MagicMock()
+        mock_account.is_connected = True
+        mock_account.balance = 10000.0
+        mock_account.equity = 10000.0
+        mock_account.daily_pnl_usd = 0.0
+        mock_account.weekly_pnl_usd = 0.0
+        mock_account.drawdown_pct = 0.0
+        mock_account.open_positions_count = 0
+
+        with patch("app.adapters.mt5_adapter.mt5_adapter.place_order", return_value=(True, MagicMock(trade_id="12345"), "Order placed")) as mock_place_order, \
+             patch("app.adapters.mt5_adapter.mt5_adapter.get_account_info", return_value=mock_account), \
+             patch("app.adapters.mt5_adapter.mt5_adapter.fetch_candles", return_value=candles_signal), \
+             patch("app.adapters.mt5_adapter.mt5_adapter.get_ticker", return_value=ticker), \
+             patch("app.adapters.mt5_adapter.mt5_adapter.get_positions", return_value=[]), \
+             patch("app.adapters.mt5_adapter.mt5_adapter.get_pending_orders", return_value=[]), \
+             patch("app.adapters.mt5_adapter.mt5_adapter.get_history", return_value=[]), \
+             patch.object(decision_engine, "evaluate_trade_opportunity", return_value=buy_report):
+
+            # Cycle 1: Fresh BUY signal initiates pending confirmation
+            res1 = trade_manager.evaluate_and_execute_pipeline("XAUUSD", "M1")
+            mock_place_order.assert_not_called()
+            assert worker.pending_confirmation is not None
+
+            # Cycle 2: Reversing next candle arrives (sharp selloff)
+            signal_ts = candles_signal[-1].timestamp
+            next_candle_ts = signal_ts + timedelta(minutes=1)
+            reversing_candle = Candle(
+                timestamp=next_candle_ts,
+                open=2009.5, high=2009.8, low=2001.0, close=2002.0,
+                volume=600.0, timeframe="M1", is_closed=True
+            )
+            candles_reversing = candles_signal + [reversing_candle]
+
+            latest_closed = reversing_candle
+            pending_ts = worker.pending_confirmation["signal_candle_ts"]
+            pending_close = worker.pending_confirmation["signal_close"]
+            atr_val = 1.0
+            is_confirmed = (latest_closed.close >= pending_close - 0.2 * atr_val)
+
+            assert is_confirmed is False
+            # Clear pending confirmation on reversal failure
+            worker.pending_confirmation = None
+            
+            mock_place_order.assert_not_called()
+            assert worker.pending_confirmation is None
+
+    def test_confirm_next_candle_aborts_when_fresh_evaluation_changes_direction(self):
+        worker = GoldTradingWorker()
+        candles_signal = _generate_test_candles(50, "M1", base_price=2000.0, trend="BULLISH")
+        ticker = _make_test_ticker("XAUUSD", bid=2010.0, ask=2010.15)
+
+        buy_report = decision_engine.evaluate_trade_opportunity("XAUUSD", candles_signal, ticker, "M1")
+        buy_report.decision = TradeSide.BUY
+
+        sell_report = decision_engine.evaluate_trade_opportunity("XAUUSD", candles_signal, ticker, "M1")
+        sell_report.decision = TradeSide.SELL
+
+        mock_account = MagicMock()
+        mock_account.is_connected = True
+        mock_account.balance = 10000.0
+        mock_account.equity = 10000.0
+        mock_account.daily_pnl_usd = 0.0
+        mock_account.weekly_pnl_usd = 0.0
+        mock_account.drawdown_pct = 0.0
+        mock_account.open_positions_count = 0
+
+        with patch("app.adapters.mt5_adapter.mt5_adapter.place_order") as mock_place_order, \
+             patch("app.adapters.mt5_adapter.mt5_adapter.get_account_info", return_value=mock_account), \
+             patch("app.adapters.mt5_adapter.mt5_adapter.fetch_candles", return_value=candles_signal), \
+             patch("app.adapters.mt5_adapter.mt5_adapter.get_ticker", return_value=ticker), \
+             patch("app.adapters.mt5_adapter.mt5_adapter.get_positions", return_value=[]), \
+             patch("app.adapters.mt5_adapter.mt5_adapter.get_pending_orders", return_value=[]), \
+             patch.object(decision_engine, "evaluate_trade_opportunity", side_effect=[buy_report, sell_report]), \
+             patch.object(trade_manager, "_check_execution_safety", return_value=(True, "LIVE")):
+
+            # Cycle 1: Fresh BUY signal initiates pending confirmation
+            res1 = trade_manager.evaluate_and_execute_pipeline("XAUUSD", "M1")
+            assert res1["stage"] == "AWAITING_CONFIRMATION"
+            assert worker.pending_confirmation is not None
+            assert worker.pending_confirmation["direction"] == "BUY"
+
+            # Cycle 2: Next candle closes, but fresh evaluation flip to SELL
+            res2 = trade_manager.evaluate_and_execute_pipeline("XAUUSD", "M1", is_confirming_execution=True)
+
+            # Assert order was NOT placed and confirmation was aborted
+            mock_place_order.assert_not_called()
+            assert res2["success"] is False
+            assert res2["stage"] == "CONFIRMATION_ABORTED"
+            assert "aborted" in res2["reason"].lower()
+            assert worker.pending_confirmation is None
+

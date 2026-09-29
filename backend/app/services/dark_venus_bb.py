@@ -138,23 +138,24 @@ class DarkVenusStyleBBEngine:
         m1_conf = 0.0
         m1_reason = "No Counter-Trend BB Reversion"
 
-        # REGIME GUARD: Strict block against fading strong directional trends!
-        is_trend_regime = "STRONG_UPTREND" in regime or "STRONG_DOWNTREND" in regime
+        # REGIME GUARD: Strict block against fading directional trends!
+        is_downtrend = "DOWNTREND" in regime or h1_trend == "BEARISH"
+        is_uptrend = "UPTREND" in regime or h1_trend == "BULLISH"
 
-        if not is_trend_regime and strategy_mode in ("HYBRID_AUTO", "BB_MEAN_REVERSION"):
-            # Bullish Reversion: Low touches/breaks lower band + bullish rejection
+        if strategy_mode in ("HYBRID_AUTO", "BB_MEAN_REVERSION"):
+            # Bullish Reversion: Low touches/breaks lower band + bullish rejection (STRICT BLOCK in Downtrend)
             if low <= bb_lower or prev_close <= float(prev.get("bb_lower", close)):
                 is_bull_rejection = close > open_p or (open_p - low) > body_len * 1.5
-                if is_bull_rejection and percent_b <= 0.20 and h1_trend != "BEARISH":
+                if is_bull_rejection and percent_b <= 0.20 and not is_downtrend:
                     m1_active = True
                     m1_side = TradeSide.BUY
                     m1_conf = 0.82
                     m1_reason = f"Mode 1: Counter-Trend Lower BB Reversion (%B={percent_b:.2f}, Regime={regime})"
 
-            # Bearish Reversion: High touches/breaks upper band + bearish rejection
+            # Bearish Reversion: High touches/breaks upper band + bearish rejection (STRICT BLOCK in Uptrend)
             elif high >= bb_upper or prev_close >= float(prev.get("bb_upper", close)):
                 is_bear_rejection = close < open_p or (high - open_p) > body_len * 1.5
-                if is_bear_rejection and percent_b >= 0.80 and h1_trend != "BULLISH":
+                if is_bear_rejection and percent_b >= 0.80 and not is_uptrend:
                     m1_active = True
                     m1_side = TradeSide.SELL
                     m1_conf = 0.82
@@ -179,12 +180,12 @@ class DarkVenusStyleBBEngine:
         m2_reason = "No BB Momentum Breakout"
 
         if strategy_mode in ("HYBRID_AUTO", "BB_BREAKOUT"):
-            if close > bb_upper and body_ratio > 0.55 and rvol > 1.3 and rsi > 55:
+            if close > bb_upper and body_ratio > 0.55 and rvol > 1.3 and rsi > 55 and not is_downtrend:
                 m2_active = True
                 m2_side = TradeSide.BUY
                 m2_conf = 0.86
                 m2_reason = f"Mode 2: Upper BB Momentum Breakout (BodyRatio={body_ratio:.0%}, RVOL={rvol:.2f})"
-            elif close < bb_lower and body_ratio > 0.55 and rvol > 1.3 and rsi < 45:
+            elif close < bb_lower and body_ratio > 0.55 and rvol > 1.3 and rsi < 45 and not is_uptrend:
                 m2_active = True
                 m2_side = TradeSide.SELL
                 m2_conf = 0.86
@@ -209,13 +210,13 @@ class DarkVenusStyleBBEngine:
         m3_reason = "No Trend-Following BB Interaction"
 
         if strategy_mode in ("HYBRID_AUTO", "BB_TREND_FOLLOWING"):
-            if h1_trend == "BULLISH" and low <= bb_middle:
+            if h1_trend == "BULLISH" and low <= bb_middle and not is_downtrend:
                 if close > open_p:
                     m3_active = True
                     m3_side = TradeSide.BUY
                     m3_conf = 0.84
                     m3_reason = "Mode 3: Bullish BB Band Interaction in H1 Bullish Trend"
-            elif h1_trend == "BEARISH" and high >= bb_middle:
+            elif h1_trend == "BEARISH" and high >= bb_middle and not is_uptrend:
                 if close < open_p:
                     m3_active = True
                     m3_side = TradeSide.SELL
@@ -242,13 +243,13 @@ class DarkVenusStyleBBEngine:
 
         if strategy_mode in ("HYBRID_AUTO", "BB_TREND_FOLLOWING"):
             # Bullish Cross above Middle Band
-            if prev_close <= prev_bb_middle and close > bb_middle and rsi > 50 and macd_hist > 0:
+            if prev_close <= prev_bb_middle and close > bb_middle and rsi > 50 and macd_hist > 0 and not is_downtrend:
                 m4_active = True
                 m4_side = TradeSide.BUY
                 m4_conf = 0.83
                 m4_reason = "Mode 4: Central BB Middle Band Bullish Cross"
             # Bearish Cross below Middle Band
-            elif prev_close >= prev_bb_middle and close < bb_middle and rsi < 50 and macd_hist < 0:
+            elif prev_close >= prev_bb_middle and close < bb_middle and rsi < 50 and macd_hist < 0 and not is_uptrend:
                 m4_active = True
                 m4_side = TradeSide.SELL
                 m4_conf = 0.83
@@ -273,14 +274,14 @@ class DarkVenusStyleBBEngine:
         m5_reason = "No Pullback to BB Midline"
 
         if strategy_mode in ("HYBRID_AUTO", "BB_TREND_FOLLOWING"):
-            if "UPTREND" in regime or h1_trend == "BULLISH":
+            if ("UPTREND" in regime or h1_trend == "BULLISH") and not is_downtrend:
                 if abs(low - bb_middle) <= 1.2 * atr or low <= bb_middle:
                     if close > open_p and bb_width >= 0.0015:
                         m5_active = True
                         m5_side = TradeSide.BUY
                         m5_conf = 0.85
                         m5_reason = "Mode 5: Pullback Rejection at BB Middle Band in Bullish Structure"
-            elif "DOWNTREND" in regime or h1_trend == "BEARISH":
+            elif ("DOWNTREND" in regime or h1_trend == "BEARISH") and not is_uptrend:
                 if abs(high - bb_middle) <= 1.2 * atr or high >= bb_middle:
                     if close < open_p and bb_width >= 0.0015:
                         m5_active = True
@@ -308,12 +309,12 @@ class DarkVenusStyleBBEngine:
 
         if strategy_mode in ("HYBRID_AUTO", "BB_BREAKOUT"):
             if (bb_squeeze or bb_width < prev_width) and bb_expansion:
-                if close > bb_upper and rvol > 1.4:
+                if close > bb_upper and rvol > 1.4 and not is_downtrend:
                     m6_active = True
                     m6_side = TradeSide.BUY
                     m6_conf = 0.88
                     m6_reason = f"Mode 6: BB Squeeze Volatility Expansion Bullish Breakout (RVOL={rvol:.2f})"
-                elif close < bb_lower and rvol > 1.4:
+                elif close < bb_lower and rvol > 1.4 and not is_uptrend:
                     m6_active = True
                     m6_side = TradeSide.SELL
                     m6_conf = 0.88

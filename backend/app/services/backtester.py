@@ -63,21 +63,21 @@ class BacktestingEngine:
         to_date: Optional[str] = None,
         initial_balance: float = 10000.0,
         risk_pct: float = 1.0,
-        lot_sizing_mode: str = "FIXED",
-        user_configured_lot: float = 0.10,
-        min_risk_reward_ratio: float = 2.0,
+        lot_sizing_mode: str = "DYNAMIC",
+        user_configured_lot: float = 0.01,
+        min_risk_reward_ratio: float = 1.5,
         auto_trade_cooldown_seconds: int = 300,
-        daily_loss_limit_pct: float = 3.0,
-        max_consecutive_losses: int = 3,
-        max_spread_pips: float = 2.5,
+        daily_loss_limit_pct: float = 5.0,
+        max_consecutive_losses: int = 5,
+        max_spread_pips: float = 2.8,
         min_ai_confidence: float = 0.70,
         candles: Optional[List[Candle]] = None,
         # --- Scalper exit management parameters ---
-        break_even_rr: float = 0.5,
-        trailing_activation_rr: float = 0.6,
+        break_even_rr: float = 1.0,
+        trailing_activation_rr: float = 1.5,
         giveback_guard_enabled: bool = True,
-        giveback_guard_min_rr: float = 0.3,
-        giveback_guard_retrace_pct: float = 50.0,
+        giveback_guard_min_rr: float = 1.2,
+        giveback_guard_retrace_pct: float = 30.0,
         cached_reports: Optional[Dict[int, Any]] = None,
         skip_stress: bool = False,
         precomputed_full_df: Optional[Any] = None,
@@ -85,7 +85,7 @@ class BacktestingEngine:
         htf_alignment_mode: Optional[str] = None,
         disabled_setups: Optional[List[str]] = None,
         entry_confirmation_mode: str = "IMMEDIATE",
-        partial_close_enabled: bool = False,
+        partial_close_enabled: bool = True,
         partial_close_pct: float = 50.0
     ) -> Dict[str, Any]:
 
@@ -288,6 +288,13 @@ class BacktestingEngine:
 
         logger.info(f"[BACKTEST] Response ready for {symbol} ({timeframe}) | Total Trades: {metrics['total_trades']}")
 
+        eval_reports_safe = {}
+        for k, v in sim.get("eval_reports", {}).items():
+            if hasattr(v, "model_dump"):
+                eval_reports_safe[k] = v.model_dump(mode="json")
+            elif isinstance(v, dict):
+                eval_reports_safe[k] = v
+
         return {
             "symbol": symbol,
             "timeframe": timeframe,
@@ -318,8 +325,7 @@ class BacktestingEngine:
             "rejection_breakdown": sim["rejection_breakdown"],
             "blocked_opportunities": sim["blocked_opportunities"][:150], # Top 150 blocked setup inspector rows
             "robustness_stress_test": robustness_report,
-            "eval_reports": sim.get("eval_reports", {}),
-            "precomputed_full_df": full_df,
+            "eval_reports": eval_reports_safe,
             "configuration": {
                 "symbol": symbol,
                 "timeframe": timeframe,

@@ -219,7 +219,7 @@ class DecisionEngine:
         if struct_m15 is not None:
             for ob in struct_m15.order_blocks:
                 if ob.side == TradeSide.BUY and ob.bottom <= ticker.ask <= ob.top and low <= ob.top:
-                    if close > open_p:
+                    if close > open_p and h1_trend != "BEARISH" and "DOWNTREND" not in regime:
                         setups.append({
                             "id": "setup_smc_pullback_buy",
                             "name": "SETUP B: SMC Demand OB Pullback Rejection",
@@ -231,7 +231,7 @@ class DecisionEngine:
                         })
                         break
                 elif ob.side == TradeSide.SELL and ob.bottom <= ticker.bid <= ob.top and high >= ob.bottom:
-                    if close < open_p:
+                    if close < open_p and h1_trend != "BULLISH" and "UPTREND" not in regime:
                         setups.append({
                             "id": "setup_smc_pullback_sell",
                             "name": "SETUP B: SMC Supply OB Pullback Rejection",
@@ -282,73 +282,79 @@ class DecisionEngine:
             struct_type = structure.latest_structure.type
             struct_price = structure.latest_structure.price
             if "BULLISH" in struct_type and abs(low - struct_price) <= 1.5 * atr and close > open_p:
-                setups.append({
-                    "id": "setup_breakout_retest_buy",
-                    "name": "SETUP D: Bullish BOS Breakout & Retest",
-                    "active": True, "side": TradeSide.BUY, "confidence": 0.86,
-                    "trigger": "Retest rejection at broken resistance structure",
-                    "invalidation": f"Below Structure Level {struct_price:.2f}",
-                    "reason": "BOS Resistance Breakout and Retest",
-                    "type": "breakout_retest"
-                })
+                if h1_trend != "BEARISH" and "DOWNTREND" not in regime:
+                    setups.append({
+                        "id": "setup_breakout_retest_buy",
+                        "name": "SETUP D: Bullish BOS Breakout & Retest",
+                        "active": True, "side": TradeSide.BUY, "confidence": 0.86,
+                        "trigger": "Retest rejection at broken resistance structure",
+                        "invalidation": f"Below Structure Level {struct_price:.2f}",
+                        "reason": "BOS Resistance Breakout and Retest",
+                        "type": "breakout_retest"
+                    })
             elif "BEARISH" in struct_type and abs(high - struct_price) <= 1.5 * atr and close < open_p:
-                setups.append({
-                    "id": "setup_breakout_retest_sell",
-                    "name": "SETUP D: Bearish BOS Breakdown & Retest",
-                    "active": True, "side": TradeSide.SELL, "confidence": 0.86,
-                    "trigger": "Retest rejection at broken support structure",
-                    "invalidation": f"Above Structure Level {struct_price:.2f}",
-                    "reason": "BOS Support Breakdown and Retest",
-                    "type": "breakout_retest"
-                })
+                if h1_trend != "BULLISH" and "UPTREND" not in regime:
+                    setups.append({
+                        "id": "setup_breakout_retest_sell",
+                        "name": "SETUP D: Bearish BOS Breakdown & Retest",
+                        "active": True, "side": TradeSide.SELL, "confidence": 0.86,
+                        "trigger": "Retest rejection at broken support structure",
+                        "invalidation": f"Above Structure Level {struct_price:.2f}",
+                        "reason": "BOS Support Breakdown and Retest",
+                        "type": "breakout_retest"
+                    })
 
         # -------------------------------------------------------------
         # SETUP E: EMA TREND PULLBACK
         # -------------------------------------------------------------
         if ema9 > ema20 and low <= ema20 <= high and close > open_p:
-            setups.append({
-                "id": "setup_ema_pullback_buy",
-                "name": "SETUP E: EMA 9/20 Dynamic Trend Pullback",
-                "active": True, "side": TradeSide.BUY, "confidence": 0.85,
-                "trigger": "Pullback rejection at dynamic EMA 20 support",
-                "invalidation": f"Below EMA 50 {ema50:.2f}",
-                "reason": "Bullish EMA 9/20 Trend Pullback",
-                "type": "trend_following"
-            })
+            if "DOWNTREND" not in regime and h1_trend != "BEARISH" and (struct_m15 is None or struct_m15.trend != "BEARISH"):
+                setups.append({
+                    "id": "setup_ema_pullback_buy",
+                    "name": "SETUP E: EMA 9/20 Dynamic Trend Pullback",
+                    "active": True, "side": TradeSide.BUY, "confidence": 0.85,
+                    "trigger": "Pullback rejection at dynamic EMA 20 support",
+                    "invalidation": f"Below EMA 50 {ema50:.2f}",
+                    "reason": "Bullish EMA 9/20 Trend Pullback",
+                    "type": "trend_following"
+                })
         elif ema9 < ema20 and low <= ema20 <= high and close < open_p:
-            setups.append({
-                "id": "setup_ema_pullback_sell",
-                "name": "SETUP E: EMA 9/20 Dynamic Trend Pullback",
-                "active": True, "side": TradeSide.SELL, "confidence": 0.85,
-                "trigger": "Pullback rejection at dynamic EMA 20 resistance",
-                "invalidation": f"Above EMA 50 {ema50:.2f}",
-                "reason": "Bearish EMA 9/20 Trend Pullback",
-                "type": "trend_following"
-            })
+            if "UPTREND" not in regime and h1_trend != "BULLISH" and (struct_m15 is None or struct_m15.trend != "BULLISH"):
+                setups.append({
+                    "id": "setup_ema_pullback_sell",
+                    "name": "SETUP E: EMA 9/20 Dynamic Trend Pullback",
+                    "active": True, "side": TradeSide.SELL, "confidence": 0.85,
+                    "trigger": "Pullback rejection at dynamic EMA 20 resistance",
+                    "invalidation": f"Above EMA 50 {ema50:.2f}",
+                    "reason": "Bearish EMA 9/20 Trend Pullback",
+                    "type": "trend_following"
+                })
 
         # -------------------------------------------------------------
         # SETUP F: MOMENTUM CONTINUATION
         # -------------------------------------------------------------
         if rvol > 1.3 and rsi > 55 and macd_hist > 0 and close > open_p:
-            setups.append({
-                "id": "setup_momentum_buy",
-                "name": "SETUP F: Bullish Volume & Momentum Expansion",
-                "active": True, "side": TradeSide.BUY, "confidence": 0.84,
-                "trigger": "High RVOL + RSI & MACD Momentum Expansion",
-                "invalidation": f"Below Low {low:.2f}",
-                "reason": "Volume and Momentum Continuation",
-                "type": "momentum"
-            })
+            if "DOWNTREND" not in regime and h1_trend != "BEARISH" and (struct_m15 is None or struct_m15.trend != "BEARISH"):
+                setups.append({
+                    "id": "setup_momentum_buy",
+                    "name": "SETUP F: Bullish Volume & Momentum Expansion",
+                    "active": True, "side": TradeSide.BUY, "confidence": 0.84,
+                    "trigger": "High RVOL + RSI & MACD Momentum Expansion",
+                    "invalidation": f"Below Low {low:.2f}",
+                    "reason": "Volume and Momentum Continuation",
+                    "type": "momentum"
+                })
         elif rvol > 1.3 and rsi < 45 and macd_hist < 0 and close < open_p:
-            setups.append({
-                "id": "setup_momentum_sell",
-                "name": "SETUP F: Bearish Volume & Momentum Expansion",
-                "active": True, "side": TradeSide.SELL, "confidence": 0.84,
-                "trigger": "High RVOL + RSI & MACD Momentum Expansion",
-                "invalidation": f"Above High {high:.2f}",
-                "reason": "Volume and Momentum Continuation",
-                "type": "momentum"
-            })
+            if "UPTREND" not in regime and h1_trend != "BULLISH" and (struct_m15 is None or struct_m15.trend != "BULLISH"):
+                setups.append({
+                    "id": "setup_momentum_sell",
+                    "name": "SETUP F: Bearish Volume & Momentum Expansion",
+                    "active": True, "side": TradeSide.SELL, "confidence": 0.84,
+                    "trigger": "High RVOL + RSI & MACD Momentum Expansion",
+                    "invalidation": f"Above High {high:.2f}",
+                    "reason": "Volume and Momentum Continuation",
+                    "type": "momentum"
+                })
 
         disabled = getattr(trade_manager.risk_settings, "disabled_setups", [])
         if disabled:
@@ -507,8 +513,8 @@ class DecisionEngine:
         is_sell_reversal = best_sell_setup and best_sell_setup.get("type") in ("reversal", "breakout_retest")
 
         # 1. Context Score (20 pts: Macro H1 + H4 + Wyckoff)
-        base_long = 20.0 if h1_trend == "BULLISH" or is_buy_reversal else (10.0 if h1_trend == "NEUTRAL" else 0.0)
-        base_short = 20.0 if h1_trend == "BEARISH" or is_sell_reversal else (10.0 if h1_trend == "NEUTRAL" else 0.0)
+        base_long = 20.0 if h1_trend == "BULLISH" else (10.0 if h1_trend == "NEUTRAL" else 0.0)
+        base_short = 20.0 if h1_trend == "BEARISH" else (10.0 if h1_trend == "NEUTRAL" else 0.0)
 
         if h4_trend == "BEARISH" and h1_trend == "BULLISH" and not is_buy_reversal:
             context_long = max(5.0, base_long - 7.5)
@@ -526,8 +532,8 @@ class DecisionEngine:
             context_short = min(20.0, context_short + 5.0)
 
         # 2. Structure Score (20 pts)
-        struct_long = 20.0 if structure.trend == "BULLISH" or is_buy_reversal else (10.0 if structure.trend == "NEUTRAL" else 0.0)
-        struct_short = 20.0 if structure.trend == "BEARISH" or is_sell_reversal else (10.0 if structure.trend == "NEUTRAL" else 0.0)
+        struct_long = 20.0 if structure.trend == "BULLISH" else (10.0 if structure.trend == "NEUTRAL" else 0.0)
+        struct_short = 20.0 if structure.trend == "BEARISH" else (10.0 if structure.trend == "NEUTRAL" else 0.0)
 
         # 3. Entry Setup Score (25 pts)
         setup_long = best_buy_conf * 25.0
@@ -565,11 +571,22 @@ class DecisionEngine:
         LONG_SCORE = min(1.0, raw_long / 100.0)
         SHORT_SCORE = min(1.0, raw_short / 100.0)
 
-        # AI Predictor Model Ensemble if available
+        # AI Predictor Model Ensemble (Confidence-Gated Veto Logic)
         p_buy, p_sell, p_no_trade, ml_status = ai_predictor.predict(symbol, df, htf_candles)
         if ai_predictor.model is not None:
-            LONG_SCORE = (LONG_SCORE * settings.WEIGHT_RULE_ENGINE) + (p_buy * settings.WEIGHT_ML_MODEL)
-            SHORT_SCORE = (SHORT_SCORE * settings.WEIGHT_RULE_ENGINE) + (p_sell * settings.WEIGHT_ML_MODEL)
+            ml_conf = max(p_buy, p_sell)
+            ml_dir = "BUY" if p_buy > p_sell else ("SELL" if p_sell > p_buy else "NEUTRAL")
+            rule_dir = "BUY" if LONG_SCORE > SHORT_SCORE and LONG_SCORE >= 0.40 else ("SELL" if SHORT_SCORE > LONG_SCORE and SHORT_SCORE >= 0.40 else "NEUTRAL")
+            margin = abs(p_buy - p_sell)
+            
+            if ml_conf >= 0.45 and margin >= 0.15 and ml_dir != "NEUTRAL" and rule_dir != "NEUTRAL":
+                if ml_dir != rule_dir:
+                    penalty = 0.15 + (margin * 0.20)
+                    if rule_dir == "BUY":
+                        LONG_SCORE = max(0.0, LONG_SCORE - penalty)
+                    elif rule_dir == "SELL":
+                        SHORT_SCORE = max(0.0, SHORT_SCORE - penalty)
+                    logger.info(f"[DECISION ENGINE] ML Veto Penalty (-{penalty:.4f}) applied. Rule: {rule_dir}, ML: {ml_dir} (conf: {ml_conf:.2f}, margin: {margin:.2f})")
 
         # Regime-Aware Dynamic Confidence Thresholds
         regime_thresholds = {
@@ -657,7 +674,7 @@ class DecisionEngine:
         # 3. Dynamic Stop Loss & Take Profit & Risk/Reward Calculation
         effective_thresholds = trade_learner.get_effective_thresholds()
         required_rr = effective_thresholds["min_rr_ratio"]
-        base_sl_distance = max(30 * point, atr * 1.5)
+        base_sl_distance = max(40 * point, atr * 2.5)
         sl_distance = base_sl_distance
 
         if candidate_side == TradeSide.BUY:

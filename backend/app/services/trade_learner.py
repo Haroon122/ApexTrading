@@ -61,6 +61,14 @@ class TradeLearnerService:
                     cursor.execute("ALTER TABLE trade_history_memory ADD COLUMN setup_name TEXT DEFAULT 'Unknown'")
                 except Exception:
                     pass
+                try:
+                    cursor.execute("ALTER TABLE trade_history_memory ADD COLUMN ml_pred_side TEXT DEFAULT NULL")
+                except Exception:
+                    pass
+                try:
+                    cursor.execute("ALTER TABLE trade_history_memory ADD COLUMN ml_confidence REAL DEFAULT 0.0")
+                except Exception:
+                    pass
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS system_metadata (
                         key TEXT PRIMARY KEY,
@@ -89,7 +97,9 @@ class TradeLearnerService:
         atr: float = 0.0015,
         confidence_score: float = 0.80,
         setup_name: str = "Unknown",
-        open_timestamp: Optional[datetime] = None
+        open_timestamp: Optional[datetime] = None,
+        ml_pred_side: Optional[str] = None,
+        ml_confidence: float = 0.0
     ) -> bool:
         ts = (open_timestamp or datetime.now()).isoformat()
         try:
@@ -98,12 +108,14 @@ class TradeLearnerService:
                 cursor.execute("""
                     INSERT OR REPLACE INTO trade_history_memory (
                         trade_id, symbol, side, timeframe, entry_price, lots, sl_price, tp_price,
-                        win_loss, regime, rsi, macd_hist, rvol, atr, confidence_score, setup_name, open_timestamp
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, ?, ?)
+                        win_loss, regime, rsi, macd_hist, rvol, atr, confidence_score, setup_name, open_timestamp,
+                        ml_pred_side, ml_confidence
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (trade_id, symbol, side, timeframe, entry_price, lots, sl_price, tp_price,
-                      regime, rsi, macd_hist, rvol, atr, confidence_score, setup_name, ts))
+                      regime, rsi, macd_hist, rvol, atr, confidence_score, setup_name, ts,
+                      ml_pred_side, ml_confidence))
                 conn.commit()
-                logger.info(f"[TRADE LEARNER] Logged new trade #{trade_id} ({symbol} {side} @ {entry_price}) [Setup: {setup_name}] into trade memory")
+                logger.info(f"[TRADE LEARNER] Logged new trade #{trade_id} ({symbol} {side} @ {entry_price}) [Setup: {setup_name}] [ML Pred: {ml_pred_side}] into trade memory")
                 return True
         except Exception as e:
             logger.error(f"[TRADE LEARNER] Failed to log trade execution #{trade_id}: {e}")
@@ -130,10 +142,67 @@ class TradeLearnerService:
                 """, (exit_price, pnl_usd, pnl_pips, win_loss, exit_reason, ts, trade_id))
                 conn.commit()
                 logger.info(f"[TRADE LEARNER] Updated outcome for trade #{trade_id}: {win_loss} (${pnl_usd:+.2f} USD / {pnl_pips:+.1f} pips)")
+                self.evaluate_live_ml_performance()
                 return True
         except Exception as e:
             logger.error(f"[TRADE LEARNER] Failed to update trade outcome #{trade_id}: {e}")
             return False
+
+    def evaluate_live_ml_performance(self, rolling_window: int = 30) -> Dict[str, Any]:
+        """
+        Calculates live ML prediction accuracy & macro F1 over rolling window of closed trades.
+        Logs a degradation alert if live F1 drops below 0.40.
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT side, win_loss, ml_pred_side, ml_confidence
+                    FROM trade_history_memory
+                    WHERE win_loss IN ('WIN', 'LOSS', 'EVEN') AND ml_pred_side IS NOT NULL AND ml_pred_side != ''
+                    ORDER BY close_timestamp DESC LIMIT ?
+                """, (rolling_window,))
+                rows = cursor.fetchall()
+                if not rows:
+                    return {"sample_count": 0, "accuracy": 0.0, "f1": 0.0, "degraded": False}
+
+                y_true = []
+                y_pred = []
+                for r in rows:
+                    side = r["side"]
+                    win_loss = r["win_loss"]
+                    pred_side = r["ml_pred_side"]
+
+                    if win_loss == "WIN":
+                        true_class = 1 if side == "BUY" else 2
+                    else:
+                        true_class = 0
+
+                    pred_class = 1 if pred_side == "BUY" else (2 if pred_side == "SELL" else 0)
+                    
+                    y_true.append(true_class)
+                    y_pred.append(pred_class)
+
+                from sklearn.metrics import accuracy_score, f1_score
+                acc = float(accuracy_score(y_true, y_pred))
+                f1 = float(f1_score(y_true, y_pred, average="macro", zero_division=0))
+
+                degraded = f1 < 0.40 and len(rows) >= 5
+                if degraded:
+                    logger.warning(
+                        f"[ML PERFORMANCE DEGRADATION ALERT] Live ML model F1 score dropped to {f1:.4f} "
+                        f"(< 0.40 limit) over last {len(rows)} trades (Accuracy: {acc:.2%})!"
+                    )
+
+                return {
+                    "sample_count": len(rows),
+                    "accuracy": acc,
+                    "f1": f1,
+                    "degraded": degraded
+                }
+        except Exception as e:
+            logger.error(f"[TRADE LEARNER] Error evaluating live ML performance: {e}")
+            return {"sample_count": 0, "accuracy": 0.0, "f1": 0.0, "degraded": False}
 
     def mark_trade_discrepancy(
         self,

@@ -220,6 +220,21 @@ class TestDarkVenusGoldEngine(unittest.TestCase):
         self.assertEqual(norm_lots, 0.10, "0.10 lot configuration MUST NOT be modified or amplified!")
         self.assertNotEqual(norm_lots, 100.00, "0.10 -> 100 lot bug MUST NOT OCCUR!")
 
+    def test_12_dark_venus_counter_trend_guards_in_downtrend(self):
+        """TEST 12: Verify Modes 2, 4, 6 strictly block counter-trend BUY signals in DOWNTREND / BEARISH H1"""
+        df = self._generate_mock_df(30)
+        # Force upper breakout scenario
+        df.iloc[-1, df.columns.get_loc("close")] = float(df.iloc[-1]["bb_upper"]) + 1.5
+        df.iloc[-1, df.columns.get_loc("open")] = float(df.iloc[-1]["bb_upper"]) + 0.1
+        df.iloc[-1, df.columns.get_loc("rvol")] = 1.6
+        df.iloc[-1, df.columns.get_loc("rsi_14")] = 65.0
+
+        # In DOWNTREND / BEARISH H1 -> Mode 2 BUY breakout MUST BE BLOCKED
+        setups_downtrend = DarkVenusStyleBBEngine.evaluate_bb_signals(df, regime="WEAK_DOWNTREND", h1_trend="BEARISH")
+        m2_down = next((s for s in setups_downtrend if s["id"] == "dv_mode_2"), None)
+        self.assertIsNotNone(m2_down)
+        self.assertFalse(m2_down["active"], "Mode 2 BUY breakout MUST be blocked when H1 trend is BEARISH / DOWNTREND")
+
 
 if __name__ == "__main__":
     unittest.main()

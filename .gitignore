@@ -49,7 +49,9 @@ server.log
 *.swo
 *~
 
-# Operating System
-.DS_Store
-Thumbs.db
-desktop.ini
+# Scratch & Temporary Files
+scratch_*.txt
+*.scratch.txt
+backend/scratch_*.txt
+*.deprecated
+

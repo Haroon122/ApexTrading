@@ -4,6 +4,7 @@ Handles order execution, break-even shift, trailing stops, position monitoring, 
 """
 
 import logging
+from datetime import datetime, date
 from typing import Dict, List, Optional, Tuple, Any
 from app.core.config import settings
 from app.adapters.mt5_adapter import mt5_adapter
@@ -37,6 +38,7 @@ class TradeManager:
         self.daily_trade_count: int = 0
         self.last_trade_date: Optional[date] = None
         self.risk_settings: RiskSettings = self._load_persisted_risk_settings()
+        self.pending_confirmation: Optional[Dict[str, Any]] = None
         self.executed_signals: Dict[str, datetime] = {}
         self.training_active: bool = False
         self.backtest_active: bool = False
@@ -94,12 +96,12 @@ class TradeManager:
             max_allowed_lot=0.05,
             default_lot_size=0.01,
             trailing_stop_pips=15.0,
-            trailing_activation_rr=0.6,
+            trailing_activation_rr=1.2,
             trailing_atr_multiplier=2.0,
-            break_even_rr=settings.BREAK_EVEN_AT_RR,
+            break_even_rr=1.0,
             giveback_guard_enabled=True,
-            giveback_guard_min_rr=0.2,
-            giveback_guard_retrace_pct=30.0,
+            giveback_guard_min_rr=0.8,
+            giveback_guard_retrace_pct=50.0,
             min_ai_confidence=settings.MIN_AI_CONFIDENCE,
             auto_trade_enabled=False,
             auto_trade_cooldown_seconds=300,
@@ -281,7 +283,8 @@ class TradeManager:
         self,
         symbol: str,
         timeframe: str = "M15",
-        force_execution: bool = False
+        force_execution: bool = False,
+        is_confirming_execution: bool = False
     ) -> Dict[str, Any]:
         """
         Single Authoritative AI Execution Pipeline.
@@ -342,6 +345,23 @@ class TradeManager:
 
         report = decision_engine.evaluate_trade_opportunity(symbol, candles, ticker, timeframe, htf_candles=htf_candles)
         
+        # Validation for pending signal confirmation: abort execution if fresh evaluation direction differs from pending direction
+        if is_confirming_execution and self.pending_confirmation is not None:
+            expected_dir = self.pending_confirmation.get("direction")
+            if report.decision.value != expected_dir:
+                msg = f"[CONFIRMATION ABORTED - SIGNAL CHANGED] Pending {expected_dir} signal for {symbol} on {timeframe} aborted because fresh evaluation returned {report.decision.value}."
+                logger.info(msg)
+                self.pending_confirmation = None
+                display_report = report.model_copy()
+                display_report.decision = TradeSide.HOLD
+                return {
+                    "success": False,
+                    "stage": "CONFIRMATION_ABORTED",
+                    "reason": msg,
+                    "message": msg,
+                    "report": display_report
+                }
+        
         if report.decision.value == "HOLD":
             rej_list = report.rejection_reasons or []
             primary_code = rej_list[0] if rej_list else "HOLD"
@@ -380,6 +400,37 @@ class TradeManager:
                 "message": f"Risk Management Rejected Order: {first_risk}",
                 "risk_reasons": risk_check.reasons,
                 "report": report
+            }
+
+        # 4.5. Entry Confirmation Gate (IMMEDIATE vs CONFIRM_NEXT_CANDLE)
+        confirm_mode = getattr(self.risk_settings, "entry_confirmation_mode", "IMMEDIATE")
+        if confirm_mode == "CONFIRM_NEXT_CANDLE" and not force_execution and not is_confirming_execution:
+            latest_closed = candles[-1] if (candles and candles[-1].is_closed) else (candles[-2] if candles and len(candles) >= 2 else (candles[-1] if candles else None))
+            signal_ts = latest_closed.timestamp if latest_closed else datetime.now()
+            signal_close = latest_closed.close if latest_closed else (ticker.bid if ticker else 0.0)
+            
+            self.pending_confirmation = {
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "direction": report.decision.value,
+                "signal_candle_ts": signal_ts,
+                "signal_close": signal_close,
+                "report": report
+            }
+            pending_dir = report.decision.value
+            tf_mins = timeframe[1:] if len(timeframe) > 1 else "1"
+            hold_msg = f"Trade Held [Confirmation Delay]: {pending_dir} signal pending on {timeframe}. Awaiting next candle close confirmation (~{tf_mins} min delay)."
+            logger.info(f"[ENTRY CONFIRMATION INITIATED] Stored pending {pending_dir} signal for {symbol} on {timeframe}.")
+            
+            display_report = report.model_copy()
+            display_report.decision = TradeSide.HOLD
+            
+            return {
+                "success": False,
+                "stage": "AWAITING_CONFIRMATION",
+                "reason": hold_msg,
+                "message": hold_msg,
+                "report": display_report
             }
 
         # 5. Broker / Adapter Trade Execution
