@@ -301,7 +301,7 @@ class RiskSettings(BaseModel):
     entry_confirmation_mode: str = "IMMEDIATE"  # IMMEDIATE (default) or CONFIRM_NEXT_CANDLE
     bb_period: int = 20
     bb_std: float = 2.0
-    allowed_sessions: List[str] = ["ASIAN", "LONDON", "NEWYORK", "LONDON_NY_OVERLAP"]
+    allowed_sessions: List[str] = ["LONDON", "NEWYORK", "LONDON_NY_OVERLAP"]
     lot_sizing_mode: str = "DYNAMIC_RISK"  # "FIXED" or "DYNAMIC_RISK"
     user_configured_lot: float = 0.01
     max_allowed_lot: float = 0.10
@@ -310,8 +310,8 @@ class RiskSettings(BaseModel):
     trailing_activation_rr: float = 1.2
     trailing_atr_multiplier: float = 2.0
     break_even_rr: float = 1.0
-    giveback_guard_enabled: bool = True
-    giveback_guard_min_rr: float = 0.8
+    giveback_guard_enabled: bool = False
+    giveback_guard_min_rr: float = 1.5
     giveback_guard_retrace_pct: float = 50.0
     auto_breakeven_enabled: bool = True
     auto_trailing_stop_enabled: bool = True
@@ -323,8 +323,15 @@ class RiskSettings(BaseModel):
     max_spread_pips: float = 2.5
     enable_live_trading: bool = False
     htf_alignment_filter_enabled: bool = True
-    htf_alignment_mode: str = "MODERATE"
-    disabled_setups: List[str] = Field(default_factory=list)
+    htf_alignment_mode: str = "STRICT"
+    disabled_setups: List[str] = Field(default_factory=lambda: [
+        "BB Midline Pullback",
+        "SETUP D: Bullish BOS Breakout & Retest",
+        "SETUP D: Bearish BOS Breakdown & Retest",
+        "SETUP F: Bullish Volume & Momentum Expansion",
+        "SETUP F: Bearish Volume & Momentum Expansion",
+        "BB Band Breakout / Momentum"
+    ])
     active_model_version: Optional[str] = None
 
 

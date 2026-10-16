@@ -4,7 +4,11 @@ REM ApexTrader AI — Backend Server Startup Script
 REM Python: 64-bit Python 3.11.9 (required by MetaTrader5)
 REM ============================================================
 
-SET PYTHON=C:\Users\localadmin\AppData\Local\Programs\Python\Python311\python.exe
+IF EXIST "%LOCALAPPDATA%\Programs\Python\Python311\python.exe" (
+    SET PYTHON=%LOCALAPPDATA%\Programs\Python\Python311\python.exe
+) ELSE (
+    SET PYTHON=python
+)
 SET BACKEND_DIR=%~dp0backend
 
 echo.

@@ -1,0 +1,33 @@
+{
+  "symbol": "XAUUSD",
+  "timeframe": "M15",
+  "candle_count": 350,
+  "period_start": "2026-09-28T18:15:50.503872",
+  "period_end": "2026-10-02T09:30:50.503872",
+  "before": {
+    "total_trades": 4,
+    "winning_trades": 1,
+    "losing_trades": 3,
+    "break_even_trades": 0,
+    "win_rate_pct": 25.0,
+    "net_profit_usd": -70.72,
+    "net_roi_pct": -0.71,
+    "profit_factor": 0.08,
+    "max_drawdown_pct": 0.71,
+    "max_consecutive_losses": 2,
+    "final_balance": 9929.28
+  },
+  "after": {
+    "total_trades": 0,
+    "winning_trades": 0,
+    "losing_trades": 0,
+    "break_even_trades": 0,
+    "win_rate_pct": 0.0,
+    "net_profit_usd": 0.0,
+    "net_roi_pct": 0.0,
+    "profit_factor": 0.0,
+    "max_drawdown_pct": 0.0,
+    "max_consecutive_losses": 0,
+    "final_balance": 10000.0
+  }
+}

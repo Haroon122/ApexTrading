@@ -89,7 +89,7 @@ class TradeManager:
             daily_loss_limit_pct=settings.DAILY_LOSS_LIMIT_PCT,
             weekly_loss_limit_pct=settings.WEEKLY_LOSS_LIMIT_PCT,
             max_open_positions=settings.MAX_OPEN_POSITIONS,
-            entry_timeframe="M1",
+            entry_timeframe="M15",
             entry_confirmation_mode="IMMEDIATE",
             lot_sizing_mode="DYNAMIC_RISK",
             user_configured_lot=0.01,
@@ -99,8 +99,8 @@ class TradeManager:
             trailing_activation_rr=1.2,
             trailing_atr_multiplier=2.0,
             break_even_rr=1.0,
-            giveback_guard_enabled=True,
-            giveback_guard_min_rr=0.8,
+            giveback_guard_enabled=False,
+            giveback_guard_min_rr=1.5,
             giveback_guard_retrace_pct=50.0,
             min_ai_confidence=settings.MIN_AI_CONFIDENCE,
             auto_trade_enabled=False,
@@ -826,7 +826,7 @@ class TradeManager:
                 trade.peak_profit_rr = profit_rr
 
             # Read dynamic trailing settings
-            activation_rr = float(getattr(self.risk_settings, "trailing_activation_rr", 0.6))
+            activation_rr = float(getattr(self.risk_settings, "trailing_activation_rr", 1.2))
             atr_mult = float(getattr(self.risk_settings, "trailing_atr_multiplier", 2.0))
 
             # Fetch M1 ATR for dynamic trailing distance
@@ -847,8 +847,8 @@ class TradeManager:
             # Fires only BEFORE trailing activation to avoid conflicting with the trailing stop.
             # Closes the position at market if the trade retraces more than giveback_retrace_pct
             # of its peak unrealized R-multiple, provided peak has reached giveback_min_rr.
-            giveback_enabled = getattr(self.risk_settings, "giveback_guard_enabled", True)
-            giveback_min_rr = float(getattr(self.risk_settings, "giveback_guard_min_rr", 0.3))
+            giveback_enabled = getattr(self.risk_settings, "giveback_guard_enabled", False)
+            giveback_min_rr = float(getattr(self.risk_settings, "giveback_guard_min_rr", 1.5))
             giveback_retrace = float(getattr(self.risk_settings, "giveback_guard_retrace_pct", 50.0)) / 100.0
 
             if (

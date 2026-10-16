@@ -35,8 +35,8 @@ class Settings(BaseSettings):
     WEIGHT_ML_MODEL: float = 0.20
     
     # Session Filtering Settings
-    ENABLE_SESSION_FILTER: bool = False
-    ALLOWED_SESSIONS: List[str] = ["ASIAN", "LONDON", "NEWYORK", "LONDON_NY_OVERLAP"]
+    ENABLE_SESSION_FILTER: bool = True
+    ALLOWED_SESSIONS: List[str] = ["LONDON", "NEWYORK", "LONDON_NY_OVERLAP"]
 
     # Feature Flags
     # ---------------------------------------------------------------------------
@@ -49,12 +49,19 @@ class Settings(BaseSettings):
     # (65 combined trades, both datasets negative). Re-enable only after rework.
     SETUP_C_LIQUIDITY_SWEEP_ENABLED: bool = Field(default=False, env="SETUP_C_LIQUIDITY_SWEEP_ENABLED")
 
-    # Hard HTF (H1 + M15) Alignment Filter (Default False for live compatibility)
-    HTF_ALIGNMENT_FILTER_ENABLED: bool = Field(default=False, env="HTF_ALIGNMENT_FILTER_ENABLED")
-    HTF_ALIGNMENT_MODE: str = Field(default="MODERATE", env="HTF_ALIGNMENT_MODE")
+    # Hard HTF (H1 + M15) Alignment Filter
+    HTF_ALIGNMENT_FILTER_ENABLED: bool = Field(default=True, env="HTF_ALIGNMENT_FILTER_ENABLED")
+    HTF_ALIGNMENT_MODE: str = Field(default="STRICT", env="HTF_ALIGNMENT_MODE")
 
     # Disabled Setups List for dynamic pruning
-    DISABLED_SETUPS: List[str] = Field(default_factory=list)
+    DISABLED_SETUPS: List[str] = Field(default_factory=lambda: [
+        "BB Midline Pullback",
+        "SETUP D: Bullish BOS Breakout & Retest",
+        "SETUP D: Bearish BOS Breakdown & Retest",
+        "SETUP F: Bullish Volume & Momentum Expansion",
+        "SETUP F: Bearish Volume & Momentum Expansion",
+        "BB Band Breakout / Momentum"
+    ])
 
 
     # Risk Management Parameters

@@ -24,6 +24,7 @@ from app.services.ai_predictor import ai_predictor
 from app.services.dark_venus_bb import dark_venus_engine
 from app.services.wyckoff_engine import wyckoff_engine
 from app.services.signal_history import signal_history
+from app.services.symbol_specs import get_symbol_specs
 
 logger = logging.getLogger("ApexTrader.DecisionEngine")
 
@@ -219,7 +220,7 @@ class DecisionEngine:
         if struct_m15 is not None:
             for ob in struct_m15.order_blocks:
                 if ob.side == TradeSide.BUY and ob.bottom <= ticker.ask <= ob.top and low <= ob.top:
-                    if close > open_p and h1_trend != "BEARISH" and "DOWNTREND" not in regime:
+                    if close > open_p and h1_trend != "BEARISH" and "DOWNTREND" not in regime and rsi <= 62.0:
                         setups.append({
                             "id": "setup_smc_pullback_buy",
                             "name": "SETUP B: SMC Demand OB Pullback Rejection",
@@ -231,7 +232,7 @@ class DecisionEngine:
                         })
                         break
                 elif ob.side == TradeSide.SELL and ob.bottom <= ticker.bid <= ob.top and high >= ob.bottom:
-                    if close < open_p and h1_trend != "BULLISH" and "UPTREND" not in regime:
+                    if close < open_p and h1_trend != "BULLISH" and "UPTREND" not in regime and rsi >= 38.0:
                         setups.append({
                             "id": "setup_smc_pullback_sell",
                             "name": "SETUP B: SMC Supply OB Pullback Rejection",
@@ -406,6 +407,8 @@ class DecisionEngine:
         atr = float(latest.get("atr_14", 0.15) or 0.15)
         digits = ticker.digits or 2
         point = ticker.point_size or 0.01
+        specs = get_symbol_specs(symbol)
+        pip_size = float(specs.get("pip_size", 0.10) or 0.10)
 
         # -------------------------------------------------------------
         # A. Spread & Volatility Model
@@ -619,10 +622,37 @@ class DecisionEngine:
             candidate_side = TradeSide.SELL
 
         # -------------------------------------------------------------
+        # Choppy / Range Regime Hard Gate (Prevents false breakouts)
+        # -------------------------------------------------------------
+        regime_blocked = False
+        regime_block_reason = ""
+        adx_val = float(latest.get("adx", 25.0) or 25.0)
+        if candidate_side in (TradeSide.BUY, TradeSide.SELL):
+            if regime in ("CHOPPY", "LOW_VOLATILITY"):
+                regime_blocked = True
+                regime_block_reason = f"Market Regime ({regime}) — Blocked to prevent whipsaws and spread erosion"
+                candidate_side = TradeSide.HOLD
+
+        # -------------------------------------------------------------
+        # Session Filter Hard Gate (Trades only in London / NY / Overlap)
+        # -------------------------------------------------------------
+        session_blocked = False
+        session_block_reason = ""
+        current_time = getattr(ticker, 'timestamp', None) or (analysis_candles[-1].timestamp if analysis_candles else datetime.now())
+        session_filter_enabled = getattr(trade_manager.risk_settings, "enable_session_filter", getattr(settings, "ENABLE_SESSION_FILTER", True))
+        allowed_sessions = getattr(trade_manager.risk_settings, "allowed_sessions", None) or getattr(settings, "ALLOWED_SESSIONS", ["LONDON", "NEWYORK", "LONDON_NY_OVERLAP"])
+        active_sessions = self.get_active_sessions(current_time)
+        if session_filter_enabled and candidate_side in (TradeSide.BUY, TradeSide.SELL):
+            if not any(s in allowed_sessions for s in active_sessions):
+                session_blocked = True
+                session_block_reason = f"Trading Session {active_sessions or ['OFF_HOURS']} blocked. Allowed: {allowed_sessions}"
+                candidate_side = TradeSide.HOLD
+
+        # -------------------------------------------------------------
         # HTF (H1 + M15) Alignment Hard Gate (Opt-in via config / risk_settings)
         # -------------------------------------------------------------
-        htf_filter_enabled = getattr(trade_manager.risk_settings, "htf_alignment_filter_enabled", getattr(settings, "HTF_ALIGNMENT_FILTER_ENABLED", False))
-        htf_mode = getattr(trade_manager.risk_settings, "htf_alignment_mode", getattr(settings, "HTF_ALIGNMENT_MODE", "MODERATE")).upper()
+        htf_filter_enabled = getattr(trade_manager.risk_settings, "htf_alignment_filter_enabled", getattr(settings, "HTF_ALIGNMENT_FILTER_ENABLED", True))
+        htf_mode = getattr(trade_manager.risk_settings, "htf_alignment_mode", getattr(settings, "HTF_ALIGNMENT_MODE", "STRICT")).upper()
 
         htf_blocked = False
         htf_block_reason = ""
@@ -656,6 +686,10 @@ class DecisionEngine:
         primary_reason = "NONE"
         secondary_reasons = []
 
+        if regime_blocked:
+            secondary_reasons.append(regime_block_reason)
+        if session_blocked:
+            secondary_reasons.append(session_block_reason)
         if htf_blocked:
             secondary_reasons.append(htf_block_reason)
 
@@ -673,8 +707,9 @@ class DecisionEngine:
 
         # 3. Dynamic Stop Loss & Take Profit & Risk/Reward Calculation
         effective_thresholds = trade_learner.get_effective_thresholds()
-        required_rr = effective_thresholds["min_rr_ratio"]
-        base_sl_distance = max(40 * point, atr * 2.5)
+        required_rr = effective_thresholds.get("min_rr_ratio", 1.5)
+        # Realistic Base SL on Gold/Forex: between 25 pips ($2.50) and 130 pips ($13.00), optimal for M15 swings
+        base_sl_distance = max(25 * pip_size, min(atr * 1.3, 130 * pip_size))
         sl_distance = base_sl_distance
 
         if candidate_side == TradeSide.BUY:
@@ -682,20 +717,19 @@ class DecisionEngine:
             bullish_obs = [ob for ob in structure.order_blocks if ob.side == TradeSide.BUY and ob.bottom < entry_price]
             if bullish_obs:
                 closest_ob = max(bullish_obs, key=lambda ob: ob.bottom)
-                ob_sl_dist = entry_price - closest_ob.bottom + (10 * point)
-                if base_sl_distance <= ob_sl_dist <= max(250 * point, atr * 3.0):
+                ob_sl_dist = entry_price - closest_ob.bottom + (15 * pip_size)
+                if base_sl_distance * 0.7 <= ob_sl_dist <= max(base_sl_distance, 150 * pip_size):
                     sl_distance = ob_sl_dist
         elif candidate_side == TradeSide.SELL:
             entry_price = ticker.bid
             bearish_obs = [ob for ob in structure.order_blocks if ob.side == TradeSide.SELL and ob.top > entry_price]
             if bearish_obs:
                 closest_ob = min(bearish_obs, key=lambda ob: ob.top)
-                ob_sl_dist = closest_ob.top - entry_price + (10 * point)
-                if base_sl_distance <= ob_sl_dist <= max(250 * point, atr * 3.0):
+                ob_sl_dist = closest_ob.top - entry_price + (15 * pip_size)
+                if base_sl_distance * 0.7 <= ob_sl_dist <= max(base_sl_distance, 150 * pip_size):
                     sl_distance = ob_sl_dist
 
-        tp_distance = sl_distance * required_rr
-
+        # Structure-guided realistic Take Profit
         if candidate_side == TradeSide.BUY:
             entry_price = ticker.ask
             targets = []
@@ -707,10 +741,13 @@ class DecisionEngine:
                 targets.append(structure.value_area_high - entry_price)
             if structure.poc_price > entry_price:
                 targets.append(structure.poc_price - entry_price)
-            targets.append(atr * 3.5)
-            valid_targets = [t for t in targets if t > 30 * point]
+            valid_targets = [t for t in targets if t >= sl_distance * 1.2]
             if valid_targets:
-                tp_distance = max(min(valid_targets), sl_distance * required_rr)
+                tp_distance = min(min(valid_targets), sl_distance * 2.0)
+            else:
+                tp_distance = sl_distance * max(required_rr, 1.5)
+            # Cap maximum TP distance to achievable swing range (e.g. max $18-$22 on Gold)
+            tp_distance = min(tp_distance, max(160 * pip_size, atr * 1.8))
         elif candidate_side == TradeSide.SELL:
             entry_price = ticker.bid
             targets = []
@@ -722,10 +759,15 @@ class DecisionEngine:
                 targets.append(entry_price - structure.value_area_low)
             if structure.poc_price < entry_price:
                 targets.append(entry_price - structure.poc_price)
-            targets.append(atr * 3.5)
-            valid_targets = [t for t in targets if t > 30 * point]
+            valid_targets = [t for t in targets if t >= sl_distance * 1.2]
             if valid_targets:
-                tp_distance = max(min(valid_targets), sl_distance * required_rr)
+                tp_distance = min(min(valid_targets), sl_distance * 2.0)
+            else:
+                tp_distance = sl_distance * max(required_rr, 1.5)
+            # Cap maximum TP distance to achievable swing range
+            tp_distance = min(tp_distance, max(160 * pip_size, atr * 1.8))
+        else:
+            tp_distance = sl_distance * required_rr
 
         rr_ratio = round(tp_distance / sl_distance, 2) if sl_distance > 0 else required_rr
         rr_passed = rr_ratio >= required_rr
@@ -742,7 +784,11 @@ class DecisionEngine:
         # Determine Final Decision & Structured Primary Reason
         final_decision = TradeSide.HOLD
 
-        if htf_blocked:
+        if regime_blocked:
+            primary_reason = "CHOPPY_REGIME_BLOCKED"
+        elif session_blocked:
+            primary_reason = "SESSION_BLOCKED"
+        elif htf_blocked:
             primary_reason = "HTF_ALIGNMENT_BLOCKED"
         elif not spread_passed:
             primary_reason = "SPREAD_BLOCKED"

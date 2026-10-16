@@ -564,7 +564,18 @@ function updateRiskSettingsUI(cfg, forceModalUpdate = true) {
     el("cfg-max-positions").value = cfg.max_open_positions ?? 5;
     el("cfg-default-lot").value = cfg.default_lot_size ?? 0.01;
     if (el("cfg-auto-breakeven")) el("cfg-auto-breakeven").value = String(cfg.auto_breakeven_enabled !== false);
+    if (el("cfg-break-even-rr")) el("cfg-break-even-rr").value = cfg.break_even_rr ?? 1.0;
     if (el("cfg-auto-trailing")) el("cfg-auto-trailing").value = String(cfg.auto_trailing_stop_enabled !== false);
+    if (el("cfg-giveback-guard")) el("cfg-giveback-guard").value = String(cfg.giveback_guard_enabled === true);
+    if (el("cfg-htf-filter")) {
+      el("cfg-htf-filter").value = (cfg.htf_alignment_filter_enabled === false) ? "DISABLED" : (cfg.htf_alignment_mode ?? "STRICT");
+    }
+    if (el("cfg-session-filter")) {
+      el("cfg-session-filter").value = (cfg.allowed_sessions && cfg.allowed_sessions.includes("ASIAN")) ? "ALL" : "LONDON_NY";
+    }
+    if (el("cfg-toxic-setups")) {
+      el("cfg-toxic-setups").value = (cfg.disabled_setups && cfg.disabled_setups.length > 0) ? "BLOCKED" : "ALLOWED";
+    }
     el("cfg-trailing-pips").value = cfg.trailing_stop_pips ?? 15;
     if (el("cfg-trailing-activation-rr")) el("cfg-trailing-activation-rr").value = cfg.trailing_activation_rr ?? 1.2;
     if (el("cfg-trailing-atr-mult")) el("cfg-trailing-atr-mult").value = cfg.trailing_atr_multiplier ?? 2.0;
@@ -605,6 +616,22 @@ function updateRiskSettingsUI(cfg, forceModalUpdate = true) {
     const trActive = cfg.auto_trailing_stop_enabled !== false;
     el("risk-trailing-badge").textContent = trActive ? `Active (${cfg.trailing_stop_pips ?? 15} pips)` : "Disabled";
     el("risk-trailing-badge").className = trActive ? "text-emerald" : "text-muted";
+  }
+  if (el("risk-htf-badge")) {
+    const htfDisabled = cfg.htf_alignment_filter_enabled === false;
+    const mode = cfg.htf_alignment_mode ?? "STRICT";
+    el("risk-htf-badge").textContent = htfDisabled ? "DISABLED" : `${mode} (1H/4H)`;
+    el("risk-htf-badge").className = htfDisabled ? "text-amber" : "text-emerald";
+  }
+  if (el("risk-session-badge")) {
+    const hasAsian = cfg.allowed_sessions && cfg.allowed_sessions.includes("ASIAN");
+    el("risk-session-badge").textContent = hasAsian ? "ALL SESSIONS" : "LONDON & NY";
+    el("risk-session-badge").className = hasAsian ? "text-amber" : "text-cyan";
+  }
+  if (el("risk-toxic-badge")) {
+    const hasBlocked = cfg.disabled_setups && cfg.disabled_setups.length > 0;
+    el("risk-toxic-badge").textContent = hasBlocked ? "ELIMINATED" : "ACTIVE";
+    el("risk-toxic-badge").className = hasBlocked ? "text-emerald" : "text-amber";
   }
   if (el("risk-live-trading-badge")) {
     const liveActive = cfg.enable_live_trading === true;
@@ -2015,7 +2042,33 @@ function initControls() {
 
   el("form-risk-settings").addEventListener("submit", async (e) => {
     e.preventDefault();
+    const prevCfg = state.riskSettings || {};
+
+    // Parse HTF alignment filter
+    const htfVal = el("cfg-htf-filter") ? el("cfg-htf-filter").value : (prevCfg.htf_alignment_mode ?? "STRICT");
+    const htfEnabled = htfVal !== "DISABLED";
+    const htfMode = htfEnabled ? htfVal : "STRICT";
+
+    // Parse session filter
+    const sessVal = el("cfg-session-filter") ? el("cfg-session-filter").value : "LONDON_NY";
+    const allowedSessions = sessVal === "ALL" 
+      ? ["ASIAN", "LONDON", "NEWYORK", "LONDON_NY_OVERLAP"] 
+      : ["LONDON", "NEWYORK", "LONDON_NY_OVERLAP"];
+
+    // Parse toxic setups filter
+    const toxicVal = el("cfg-toxic-setups") ? el("cfg-toxic-setups").value : "BLOCKED";
+    const defaultToxicSetups = [
+      "BB Midline Pullback",
+      "SETUP D: Bullish BOS Breakout & Retest",
+      "SETUP D: Bearish BOS Breakdown & Retest",
+      "SETUP F: Bullish Volume & Momentum Expansion",
+      "SETUP F: Bearish Volume & Momentum Expansion",
+      "BB Band Breakout / Momentum"
+    ];
+    const disabledSetups = toxicVal === "BLOCKED" ? defaultToxicSetups : [];
+
     const payload = {
+      ...prevCfg,
       trading_mode_profile: el("cfg-trading-mode") ? el("cfg-trading-mode").value : "BALANCED",
       strategy_profile: el("cfg-strategy-profile") ? el("cfg-strategy-profile").value : "HYBRID_AUTO",
       signal_mode: el("cfg-signal-mode") ? el("cfg-signal-mode").value : "CLOSED_CANDLE",
@@ -2034,7 +2087,11 @@ function initControls() {
       max_open_positions: getInt("cfg-max-positions", 5),
       default_lot_size: getFloat("cfg-default-lot", 0.10),
       auto_breakeven_enabled: el("cfg-auto-breakeven") ? (el("cfg-auto-breakeven").value === "true") : true,
+      break_even_rr: getFloat("cfg-break-even-rr", 1.0),
       auto_trailing_stop_enabled: el("cfg-auto-trailing") ? (el("cfg-auto-trailing").value === "true") : true,
+      giveback_guard_enabled: el("cfg-giveback-guard") ? (el("cfg-giveback-guard").value === "true") : false,
+      giveback_guard_min_rr: prevCfg.giveback_guard_min_rr ?? 1.5,
+      giveback_guard_retrace_pct: prevCfg.giveback_guard_retrace_pct ?? 50.0,
       trailing_stop_pips: getFloat("cfg-trailing-pips", 15.0),
       trailing_activation_rr: getFloat("cfg-trailing-activation-rr", 1.2),
       trailing_atr_multiplier: getFloat("cfg-trailing-atr-mult", 2.0),
@@ -2044,7 +2101,11 @@ function initControls() {
       max_trades_per_day: getInt("cfg-max-daily-trades", 10),
       max_consecutive_losses: getInt("cfg-max-consecutive-losses", 5),
       max_spread_pips: getFloat("cfg-max-spread", 2.5),
-      enable_live_trading: el("cfg-enable-live-trading") ? (el("cfg-enable-live-trading").value === "true") : false
+      enable_live_trading: el("cfg-enable-live-trading") ? (el("cfg-enable-live-trading").value === "true") : false,
+      htf_alignment_filter_enabled: htfEnabled,
+      htf_alignment_mode: htfMode,
+      allowed_sessions: allowedSessions,
+      disabled_setups: disabledSetups
     };
 
     if (payload.weekly_loss_limit_pct <= 0) {
@@ -2278,8 +2339,11 @@ function initControls() {
     const btn = el("btn-run-backtest-submit");
     const errBanner = el("bt-error-banner");
     const errMsg = el("bt-error-msg");
+    const statusBanner = el("bt-status-banner");
+    const statusMsg = el("bt-status-msg");
 
     if (errBanner) errBanner.classList.add("hidden");
+    if (statusBanner) statusBanner.classList.add("hidden");
 
     const fromVal = el("bt-cfg-from-date") && el("bt-cfg-from-date").value ? el("bt-cfg-from-date").value : null;
     const toVal = el("bt-cfg-to-date") && el("bt-cfg-to-date").value ? el("bt-cfg-to-date").value : null;
@@ -2356,6 +2420,22 @@ function initControls() {
       el("bt-max-dd").textContent = fmt(data.max_drawdown_pct || 0, 2) + "%";
       el("bt-total-trades").textContent = data.total_trades !== undefined ? data.total_trades : 0;
       el("bt-max-consec-losses").textContent = data.max_consecutive_losses !== undefined ? data.max_consecutive_losses : 0;
+
+      // Status Banner Feedback
+      if (statusBanner && statusMsg) {
+        if (!data.total_trades || data.total_trades === 0) {
+          statusBanner.style.borderColor = "rgba(168, 85, 247, 0.4)";
+          statusBanner.style.background = "rgba(168, 85, 247, 0.12)";
+          statusBanner.style.color = "#e9d5ff";
+          statusMsg.innerHTML = `<i class="fa-solid fa-shield-halved" style="color:var(--accent-purple);margin-right:6px;"></i><strong>Simulation Completed:</strong> Evaluated historical range (${data.from_date || payload.from_date || "All"} to ${data.to_date || payload.to_date || "All"}). <strong>0 trades executed</strong> because market conditions during this period were in low-confidence consolidation (<72% confidence threshold) and toxic setups (BB Midline/BOS) are disabled to protect capital. <span style="display:block;margin-top:4px;color:var(--accent-cyan);"><i class="fa-solid fa-lightbulb"></i> <strong>Tip:</strong> Switch Timeframe to <strong>M5</strong> or widen the date range (e.g. from 09/01/2026) to see active execution setups!</span>`;
+        } else {
+          statusBanner.style.borderColor = "rgba(16, 185, 129, 0.4)";
+          statusBanner.style.background = "rgba(16, 185, 129, 0.12)";
+          statusBanner.style.color = "#a7f3d0";
+          statusMsg.innerHTML = `<i class="fa-solid fa-circle-check" style="color:var(--accent-emerald);margin-right:6px;"></i><strong>Simulation Completed:</strong> Successfully executed <strong>${data.total_trades} trades</strong> across historical window with <strong>${fmt(data.win_rate_pct, 1)}% Win Rate</strong>! Net Profit: <strong>${profitSign}$${fmt(Math.abs(netProfit))} ${curr}</strong>.`;
+        }
+        statusBanner.classList.remove("hidden");
+      }
 
       if (data.robustness_stress_test && el("bt-stress-pf")) {
         el("bt-stress-pf").textContent = fmt(data.robustness_stress_test.min_profit_factor || 0, 2);

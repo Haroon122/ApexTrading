@@ -554,6 +554,7 @@ def run_backtest(
     max_consecutive_losses: int = Query(default=3),
     max_spread_pips: float = Query(default=2.5)
 ) -> Dict[str, Any]:
+    rs = trade_manager.risk_settings
     if req is not None:
         return backtester.run_backtest(
             symbol=req.symbol,
@@ -570,7 +571,16 @@ def run_backtest(
             daily_loss_limit_pct=req.daily_loss_limit_pct,
             max_consecutive_losses=req.max_consecutive_losses,
             max_spread_pips=req.max_spread_pips,
-            min_ai_confidence=req.min_ai_confidence
+            min_ai_confidence=req.min_ai_confidence,
+            break_even_rr=getattr(rs, "break_even_rr", 1.0),
+            trailing_activation_rr=getattr(rs, "trailing_activation_rr", 1.2),
+            giveback_guard_enabled=getattr(rs, "giveback_guard_enabled", False),
+            giveback_guard_min_rr=getattr(rs, "giveback_guard_min_rr", 1.5),
+            giveback_guard_retrace_pct=getattr(rs, "giveback_guard_retrace_pct", 50.0),
+            htf_alignment_filter_enabled=getattr(rs, "htf_alignment_filter_enabled", True),
+            htf_alignment_mode=getattr(rs, "htf_alignment_mode", "STRICT"),
+            disabled_setups=getattr(rs, "disabled_setups", None),
+            entry_confirmation_mode=getattr(rs, "entry_confirmation_mode", "IMMEDIATE")
         )
 
     return backtester.run_backtest(
@@ -587,7 +597,16 @@ def run_backtest(
         auto_trade_cooldown_seconds=auto_trade_cooldown_seconds,
         daily_loss_limit_pct=daily_loss_limit_pct,
         max_consecutive_losses=max_consecutive_losses,
-        max_spread_pips=max_spread_pips
+        max_spread_pips=max_spread_pips,
+        break_even_rr=getattr(rs, "break_even_rr", 1.0),
+        trailing_activation_rr=getattr(rs, "trailing_activation_rr", 1.2),
+        giveback_guard_enabled=getattr(rs, "giveback_guard_enabled", False),
+        giveback_guard_min_rr=getattr(rs, "giveback_guard_min_rr", 1.5),
+        giveback_guard_retrace_pct=getattr(rs, "giveback_guard_retrace_pct", 50.0),
+        htf_alignment_filter_enabled=getattr(rs, "htf_alignment_filter_enabled", True),
+        htf_alignment_mode=getattr(rs, "htf_alignment_mode", "STRICT"),
+        disabled_setups=getattr(rs, "disabled_setups", None),
+        entry_confirmation_mode=getattr(rs, "entry_confirmation_mode", "IMMEDIATE")
     )
 
 
