@@ -85,8 +85,44 @@ class RiskManager:
                         )
                         break
 
-        # 3b. Check Maximum Daily Trades
+        # 3a-2. Same-direction stacking guard.
+        # Trade history showed most losses came from 3+ trades opened in the same
+        # direction within minutes, all stopped out together.
+        max_per_dir = int(getattr(risk_cfg, "max_positions_per_direction", 1) or 0)
+        side_val = getattr(report.decision, "value", str(report.decision))
+        if max_per_dir > 0 and all_active:
+            same_dir = [
+                p for p in all_active
+                if p.symbol == symbol
+                and getattr(p, "state", None) == TradeState.OPEN
+                and getattr(p.side, "value", str(p.side)) == side_val
+            ]
+            if len(same_dir) >= max_per_dir:
+                reasons.append(
+                    f"STACKING GUARD: {len(same_dir)} {side_val} position(s) already open on {symbol} "
+                    f"(max {max_per_dir} per direction)."
+                )
+
+        # 3a-3. Minimum spacing between entries, based on the last OPENED trade in
+        # the database so it survives restarts (in-memory cooldown resets on restart).
         from app.services.trade_learner import trade_learner
+        min_gap_min = float(getattr(risk_cfg, "min_minutes_between_entries", 30) or 0)
+        if min_gap_min > 0:
+            last_open = trade_learner.get_last_open_timestamp(symbol)
+            if last_open is not None:
+                gap = (datetime.now() - last_open).total_seconds() / 60.0
+                if 0 <= gap < min_gap_min:
+                    reasons.append(
+                        f"ENTRY SPACING: last entry on {symbol} was {gap:.0f} min ago (min {min_gap_min:.0f} min)."
+                    )
+
+        # 3a-4. Blocked hours (local machine time, same clock used for open_timestamp).
+        blocked_hours = getattr(risk_cfg, "blocked_hours", None) or []
+        now_hour = datetime.now().hour
+        if now_hour in blocked_hours:
+            reasons.append(f"BLOCKED HOUR: trading disabled at hour {now_hour:02d}:00 (blocked: {blocked_hours}).")
+
+        # 3b. Check Maximum Daily Trades
         max_daily_trades = int(getattr(risk_cfg, "max_trades_per_day", 10))
         today_trades_count = trade_learner.get_trades_count_today()
         if today_trades_count >= max_daily_trades:

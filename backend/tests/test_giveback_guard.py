@@ -66,7 +66,7 @@ class TestRiskSettingsDefaults:
     def test_giveback_guard_defaults(self):
         rs = RiskSettings()
         assert rs.giveback_guard_enabled is True
-        assert rs.giveback_guard_min_rr == pytest.approx(0.8)
+        assert rs.giveback_guard_min_rr == pytest.approx(1.5)
         assert rs.giveback_guard_retrace_pct == pytest.approx(50.0)
 
     def test_updated_thresholds(self):

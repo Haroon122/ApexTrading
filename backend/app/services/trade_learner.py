@@ -80,6 +80,22 @@ class TradeLearnerService:
         except Exception as e:
             logger.error(f"[TRADE LEARNER] Database initialization error: {e}")
 
+    def get_last_open_timestamp(self, symbol: Optional[str] = None) -> Optional[datetime]:
+        """Most recent open_timestamp in trade memory (optionally for one symbol)."""
+        try:
+            with self._get_connection() as conn:
+                cur = conn.cursor()
+                if symbol:
+                    cur.execute("SELECT MAX(open_timestamp) FROM trade_history_memory WHERE symbol = ?", (symbol,))
+                else:
+                    cur.execute("SELECT MAX(open_timestamp) FROM trade_history_memory")
+                row = cur.fetchone()
+                if row and row[0]:
+                    return datetime.fromisoformat(str(row[0])[:26])
+        except Exception as e:
+            logger.warning(f"[TRADE LEARNER] get_last_open_timestamp failed: {e}")
+        return None
+
     def log_trade_execution(
         self,
         trade_id: str,

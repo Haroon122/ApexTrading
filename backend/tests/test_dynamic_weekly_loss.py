@@ -79,6 +79,9 @@ def test_3_dynamic_risk_manager_enforcement():
     current_settings.max_trades_per_day = 1000
     current_settings.auto_trade_cooldown_seconds = 0
     current_settings.max_consecutive_losses = 999
+    current_settings.max_positions_per_direction = 0
+    current_settings.min_minutes_between_entries = 0
+    current_settings.blocked_hours = []
     trade_manager.update_risk_settings(current_settings)
 
     try:
@@ -146,6 +149,9 @@ def test_5_reset_weekly_loss_lock():
     orig_cooldown = current_settings.auto_trade_cooldown_seconds
 
     current_settings.max_consecutive_losses = 999
+    current_settings.max_positions_per_direction = 0
+    current_settings.min_minutes_between_entries = 0
+    current_settings.blocked_hours = []
     current_settings.max_trades_per_day = 1000
     current_settings.auto_trade_cooldown_seconds = 0
     trade_manager.update_risk_settings(current_settings)
@@ -261,6 +267,9 @@ def test_7_reset_testing_risk_baseline(monkeypatch):
     orig_cooldown = current_settings.auto_trade_cooldown_seconds
 
     current_settings.max_consecutive_losses = 999
+    current_settings.max_positions_per_direction = 0
+    current_settings.min_minutes_between_entries = 0
+    current_settings.blocked_hours = []
     current_settings.max_trades_per_day = 1000
     current_settings.auto_trade_cooldown_seconds = 0
     trade_manager.update_risk_settings(current_settings)
