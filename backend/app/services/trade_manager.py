@@ -563,8 +563,24 @@ class TradeManager:
             
             # Cache successfully placed signal ID
             self.executed_signals[signal_id] = datetime.now()
-            
+
+            # Snapshot real indicator values so the learner gets useful data
+            # (previously defaults like RSI=50 / ATR=0.0015 were stored for every trade).
+            feat = {}
+            try:
+                from app.services.indicators import IndicatorService
+                snap_candles = mt5_adapter.fetch_candles(symbol, timeframe, 100)
+                if snap_candles and len(snap_candles) >= 30:
+                    row = IndicatorService.calculate_all_indicators(snap_candles).iloc[-1]
+                    for key, col in (("rsi", "rsi_14"), ("atr", "atr_14"), ("macd_hist", "macd_hist"), ("rvol", "rvol")):
+                        val = row.get(col)
+                        if val is not None and val == val:  # skip NaN
+                            feat[key] = float(val)
+            except Exception as e:
+                logger.warning(f"[EXECUTE DECISION] Indicator snapshot failed: {e}")
+
             trade_learner.log_trade_execution(
+                **feat,
                 trade_id=trade.trade_id,
                 symbol=trade.symbol,
                 side=trade.side.value,

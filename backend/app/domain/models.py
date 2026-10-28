@@ -292,7 +292,10 @@ class RiskSettings(BaseModel):
             raise ValueError("weekly_loss_limit_pct must be > 0.0 and <= 100.0")
         return v
     max_daily_loss_amount: float = 5.0
-    max_open_positions: int = 5
+    max_open_positions: int = 2
+    max_positions_per_direction: int = 1
+    min_minutes_between_entries: float = 30.0
+    blocked_hours: List[int] = Field(default_factory=lambda: [18, 19, 20, 21])
     min_risk_reward_ratio: float = 2.0
     trading_mode_profile: str = "BALANCED"  # CONSERVATIVE, BALANCED, AGGRESSIVE
     strategy_profile: str = "HYBRID_AUTO"  # HYBRID_AUTO, BB_MEAN_REVERSION, BB_TREND_FOLLOWING, BB_BREAKOUT, INSTITUTIONAL_ONLY
@@ -310,7 +313,7 @@ class RiskSettings(BaseModel):
     trailing_activation_rr: float = 1.2
     trailing_atr_multiplier: float = 2.0
     break_even_rr: float = 1.0
-    giveback_guard_enabled: bool = False
+    giveback_guard_enabled: bool = True
     giveback_guard_min_rr: float = 1.5
     giveback_guard_retrace_pct: float = 50.0
     auto_breakeven_enabled: bool = True
