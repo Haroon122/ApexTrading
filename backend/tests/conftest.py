@@ -11,6 +11,20 @@ from app.services import trade_manager as tm_module
 from app.services.trade_learner import trade_learner
 
 
+@pytest.fixture(autouse=True, scope="session")
+def no_default_blocked_hours():
+    # Many tests build their own RiskSettings(). The model default blocks some hours,
+    # which made those tests pass or fail depending on the clock. Tests that check
+    # blocked hours set them explicitly.
+    field = RiskSettings.model_fields["blocked_hours"]
+    original = field.default_factory
+    field.default_factory = list
+    RiskSettings.model_rebuild(force=True)
+    yield
+    field.default_factory = original
+    RiskSettings.model_rebuild(force=True)
+
+
 @pytest.fixture(autouse=True)
 def isolated_storage(tmp_path, monkeypatch):
     monkeypatch.setattr(trade_learner, "db_path", str(tmp_path / "trading_memory.db"))

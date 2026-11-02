@@ -227,6 +227,11 @@ async def start_bot(
     symbol: str = Query(default=settings.DEFAULT_SYMBOL),
     timeframe: str = Query(default="M15")
 ) -> Dict[str, Any]:
+    # Donchian Trend always enters on H1; the chart timeframe sent by the dashboard
+    # must not overwrite it.
+    if getattr(trade_manager.risk_settings, "strategy_profile", "") == "DONCHIAN_TREND":
+        from app.services import donchian_trend
+        timeframe = donchian_trend.active_timeframe(trade_manager.risk_settings)
     if timeframe:
         trade_manager.update_risk_settings({"entry_timeframe": timeframe})
 
@@ -241,7 +246,7 @@ async def start_bot(
         worker_ok, worker_msg = await trading_worker.start(symbol, timeframe)
         if not worker_ok:
             logger.warning(f"[BOT START] Centralized worker failed to start: {worker_msg}")
-            trade_manager.pause_bot() # Revert status
+            trade_manager.stop_bot()  # revert to STOPPED (PAUSED left a bot with no worker)
             return {"success": False, "message": f"Worker start failed: {worker_msg}", "status": trade_manager.bot_status.value}
     return {"success": success, "message": msg, "status": trade_manager.bot_status.value}
 
@@ -306,11 +311,41 @@ def get_heuristic_scoring(
     return heuristic_scorer.calculate_score(candles, timeframe, symbol)
 
 
+@router.get("/strategy/donchian/status")
+def donchian_status(symbol: str = Query(default=settings.DEFAULT_SYMBOL)) -> Dict[str, Any]:
+    """Live Donchian Trend dashboard data (channel, next-trade plan, trailing stops)."""
+    from app.services import donchian_trend
+    rs = trade_manager.risk_settings
+    sym = mt5_adapter.discover_gold_symbol() or symbol
+    acc = mt5_adapter.get_account_info()
+    d_tf = donchian_trend.active_timeframe(rs)
+    data = donchian_trend.status(
+        sym, donchian_trend.fetch_bars(mt5_adapter, sym, d_tf),
+        mt5_adapter.get_ticker(sym), float(getattr(acc, "equity", 0.0) or 0.0),
+        float(rs.max_risk_per_trade_pct), float(rs.max_allowed_lot), mt5_adapter.get_positions(),
+        daily=donchian_trend.fetch_daily(mt5_adapter, sym), tf=d_tf)
+    data["active"] = getattr(rs, "strategy_profile", "") == donchian_trend.STRATEGY_PROFILE
+    from app.services.news_filter import news_filter, next_high_impact
+    news_on = bool(getattr(rs, "news_filter_enabled", True))
+    blocked, msg = news_filter.is_news_blackout(sym) if news_on else (False, "News filter off")
+    data["news"] = {"enabled": news_on, "blocked": blocked, "message": msg,
+                    "status": news_filter.get_news_status(), "next": next_high_impact(sym)}
+    data["currency"] = getattr(acc, "currency", "USD") or "USD"
+    return data
+
+
 @router.get("/trade/evaluate", response_model=TradeDecisionReport)
 def evaluate_trade(
     symbol: str = Query(default=settings.DEFAULT_SYMBOL),
     timeframe: str = Query(default="M15")
 ) -> TradeDecisionReport:
+    from app.services import donchian_trend
+    if getattr(trade_manager.risk_settings, "strategy_profile", "") == donchian_trend.STRATEGY_PROFILE:
+        d_tf = donchian_trend.active_timeframe(trade_manager.risk_settings)
+        h1 = donchian_trend.fetch_bars(mt5_adapter, symbol, d_tf)
+        return donchian_trend.evaluate(symbol, h1, mt5_adapter.get_ticker(symbol), tf=d_tf,
+                                       daily=donchian_trend.fetch_daily(mt5_adapter, symbol))
+
     candles = mt5_adapter.fetch_candles(symbol, timeframe, 200)
     ticker = mt5_adapter.get_ticker(symbol)
     
@@ -383,10 +418,14 @@ def get_positions() -> List[TradeRecord]:
 def modify_position(
     trade_id: str = Query(...),
     sl: float = Query(...),
-    tp: float = Query(...)
+    tp: float = Query(0.0)
 ) -> Dict[str, Any]:
     success, msg = trade_manager.modify_position(trade_id, sl, tp)
-    return {"success": success, "message": msg}
+    return {
+        "success": success,
+        "message": msg,
+        "positions": [p.model_dump() for p in mt5_adapter.get_positions()],
+    }
 
 
 @router.post("/trade/positions/close", dependencies=[Depends(verify_api_key)])
@@ -472,6 +511,19 @@ def get_risk_settings() -> RiskSettings:
 
 @router.post("/settings/risk", dependencies=[Depends(verify_api_key)])
 def update_risk_settings(settings_data: RiskSettings) -> Dict[str, Any]:
+    from app.services import donchian_trend
+    old_tf = donchian_trend.active_timeframe(trade_manager.risk_settings)
+    new_tf = donchian_trend.active_timeframe(settings_data)
+    if new_tf != old_tf:
+        sym = mt5_adapter.discover_gold_symbol()
+        open_gold = [p for p in mt5_adapter.get_positions() if p.symbol == sym]
+        if open_gold:
+            # Trailing uses the selected chart's ATR; switching mid-trade would jump the stop.
+            return {"success": False,
+                    "message": f"Cannot switch Donchian timeframe {old_tf} -> {new_tf} while {len(open_gold)} gold trade(s) are open. "
+                               f"Close them or wait until they finish.",
+                    "settings": trade_manager.risk_settings.model_dump()}
+    settings_data.donchian_timeframe = new_tf
     updated = trade_manager.update_risk_settings(settings_data)
     return {"success": True, "message": "Risk settings updated and saved to disk", "settings": updated.model_dump()}
 

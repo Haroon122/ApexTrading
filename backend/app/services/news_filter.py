@@ -327,8 +327,13 @@ class NewsEventFilter:
         if not self.block_high_impact_news:
             return False, "News blocking is disabled in settings"
 
-        if current_time is None:
-            current_time = datetime.now()
+        # Live calendar events are stored as naive UTC. Compare against real UTC now:
+        # datetime.now() is local time (UTC+5 here) and MT5 tick timestamps are broker
+        # time, both of which shifted the blackout window by hours.
+        if isinstance(self.provider, LiveCalendarProvider):
+            current_time = datetime.utcnow()
+        elif current_time is None:
+            current_time = datetime.utcnow()
 
         # If no live provider is configured and use_mock_news is False:
         if (self.provider is None or isinstance(self.provider, MockCalendarProvider)) and not self.use_mock_news:
@@ -374,6 +379,26 @@ class NewsEventFilter:
                     return True, f"High-Impact News Blackout: {event['name']} passed {mins} minutes ago"
 
         return False, "No high-impact news blackout detected"
+
+
+def next_high_impact(symbol: str = "XAUUSD", hours: int = 48) -> Optional[Dict[str, Any]]:
+    """Next HIGH-impact event for the symbol's currencies within `hours` (times in UTC)."""
+    prov = news_filter.provider
+    if prov is None or isinstance(prov, MockCalendarProvider):
+        return None
+    now = datetime.utcnow()
+    events, ok = prov.get_events(now - timedelta(minutes=news_filter.blackout_after_minutes), now + timedelta(hours=hours))
+    if not ok or not events:
+        return None
+    cur = {"USD"} if any(k in symbol.upper() for k in ("XAU", "GOLD", "USD")) else set()
+    upcoming = sorted((e for e in events if e.get("currency") in cur and e.get("impact") == "HIGH"
+                       and e["timestamp"] >= now - timedelta(minutes=news_filter.blackout_after_minutes)),
+                      key=lambda e: e["timestamp"])
+    if not upcoming:
+        return None
+    e = upcoming[0]
+    return {"name": e["name"], "utc": e["timestamp"].isoformat(),
+            "minutes_from_now": round((e["timestamp"] - now).total_seconds() / 60)}
 
 
 # ---------------------------------------------------------------------------

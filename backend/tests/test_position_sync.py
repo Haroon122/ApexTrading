@@ -51,7 +51,7 @@ class TestPositionStateSyncSystem(unittest.TestCase):
         
         # Mock mt5_adapter.get_positions to return empty list []
         original_get_positions = mt5_adapter.get_positions
-        mt5_adapter.get_positions = lambda: []
+        mt5_adapter.get_positions = lambda: []; mt5_adapter.positions_ok = True
 
         try:
             active_list = trade_manager.reconcile_positions("XAUUSD")
@@ -67,7 +67,7 @@ class TestPositionStateSyncSystem(unittest.TestCase):
 
         # Mock MT5 returning 0 open positions
         original_get_positions = mt5_adapter.get_positions
-        mt5_adapter.get_positions = lambda: []
+        mt5_adapter.get_positions = lambda: []; mt5_adapter.positions_ok = True
 
         try:
             trade_manager.reconcile_positions("XAUUSD")
@@ -82,7 +82,7 @@ class TestPositionStateSyncSystem(unittest.TestCase):
 
         # Mock MT5 returning empty positions
         original_get_positions = mt5_adapter.get_positions
-        mt5_adapter.get_positions = lambda: []
+        mt5_adapter.get_positions = lambda: []; mt5_adapter.positions_ok = True
 
         try:
             # Running update_open_positions should perform reconciliation and skip modification

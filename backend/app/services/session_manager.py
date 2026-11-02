@@ -104,19 +104,19 @@ MT5_STANDARD_PATHS = [
 ]
 
 # ── MT5 LOGIN ERROR CODES (only after terminal is connected) ─────────────────
+# Codes returned by MetaTrader5.last_error() (see MQL5 "MetaTrader5 Python" docs).
 MT5_LOGIN_ERROR_HINTS = {
-    -10003: "Check your login ID, password, and server name.",
-    -10004: "Trade server is unreachable. Check your internet connection.",
-    -10005: "Trade server is busy. Wait a few seconds and retry.",
-    -10006: "Account does not exist on this server.",
-    -10007: "Server name not found. Verify the broker server address.",
-    -10008: "Authorization timed out. Retry the connection.",
-    -10009: "MT5 terminal build is too old. Update MetaTrader 5.",
-    -10010: "Account trading is blocked. Contact your broker.",
-    -10012: "Connection to trade server was lost during login.",
-    -10015: "IPC connection failed — terminal closed unexpectedly.",
-    -10016: "Connection error during login.",
-    -10017: "Not connected to a trading server.",
+    -1: "Generic MT5 error. Restart the MT5 terminal and retry.",
+    -2: "Invalid parameters. Check that the login is a number and the server name is exact.",
+    -6: ("Authorization failed. Check: (1) login number, (2) the MAIN (trading) password, not the "
+         "investor/read-only password, (3) the server name exactly as shown in MT5 "
+         "(File > Open an Account, or the account's Journal)."),
+    -7: "Not enough memory in the terminal.",
+    -10000: "IPC send failed. Restart the MT5 terminal.",
+    -10001: "IPC receive failed. Restart the MT5 terminal.",
+    -10003: "Could not start or attach to the MT5 terminal. Check the terminal path and that MT5 is installed.",
+    -10004: "No IPC connection to the terminal. Make sure MT5 is open.",
+    -10005: "Timed out waiting for the server. Check internet and retry.",
 }
 
 
@@ -422,6 +422,21 @@ class MT5SessionManager:
 
         return None, f"Specified terminal path does not contain terminal64.exe: {custom_path}"
 
+    def _restore_previous_session(self, log=None) -> None:
+        """After a failed login attempt, log the terminal back into the account the
+        bot was using, instead of shutting MT5 down and leaving the bot disconnected."""
+        if not MT5_AVAILABLE:
+            return
+        login, pwd, srv = getattr(self, "active_login", None), getattr(self, "active_password", None), getattr(self, "active_server", None)
+        try:
+            if login and pwd and srv:
+                ok = mt5.login(login=int(login), password=pwd, server=srv)
+                if log:
+                    log(f"Restored previous session {login} on {srv}: {'OK' if ok else 'FAILED'}")
+        except Exception as e:
+            if log:
+                log(f"Could not restore previous session: {e}")
+
     def _establish_mt5_connection(
         self,
         login: int,
@@ -460,6 +475,8 @@ class MT5SessionManager:
             return False, "Invalid Password.", None, diagnostics
         if not server or len(server.strip()) < 2:
             return False, "Invalid Server.", None, diagnostics
+        server = server.strip()
+        diagnostics.requested_server = server
 
         log(f"Diagnostics: Python Architecture: {PYTHON_ARCH}")
         if not IS_64BIT_PYTHON:
@@ -488,28 +505,15 @@ class MT5SessionManager:
 
         # 2. Initialize MT5
         try:
-            # Shutdown current first if connected to a different account/server
-            try:
-                current_acc = mt5.account_info()
-                if current_acc:
-                    if current_acc.login != login or current_acc.server != server:
-                        log(f"Switching account. Shutting down current session ({current_acc.login} on {current_acc.server})...")
-                        mt5.shutdown()
-            except Exception:
-                pass
+            def same_account(acc) -> bool:
+                # MT5 server names are case-insensitive ("Metaquotes-Demo" == "MetaQuotes-Demo")
+                return bool(acc) and acc.login == login and (acc.server or "").lower() == server.lower()
 
-            init_kwargs = {"login": login, "server": server}
-            if password and password != "demo_password":
-                init_kwargs["password"] = password
-            if terminal_path:
-                init_kwargs["path"] = terminal_path
-
-            log(f"Initializing MT5 terminal with path: {terminal_path or 'default'}")
-            init_ok = mt5.initialize(**init_kwargs)
-
-            if not init_ok:
-                log("Unified initialize failed — falling back to path-only initialize...")
-                init_ok = mt5.initialize(path=terminal_path) if terminal_path else mt5.initialize()
+            # Attach to the terminal WITHOUT credentials first. Passing login/password to
+            # initialize() (or calling shutdown) makes MT5 re-login, and MT5 then turns
+            # "Algo Trading" off with "account has been changed".
+            log(f"Attaching to MT5 terminal: {terminal_path or 'default'}")
+            init_ok = mt5.initialize(path=terminal_path) if terminal_path else mt5.initialize()
 
             if not init_ok:
                 err = mt5.last_error()
@@ -523,12 +527,16 @@ class MT5SessionManager:
             diagnostics.mt5_initialize = "PASS"
             log("initialize() succeeded")
 
-            # 3. Login using account number + password + server
+            # 3. Login only if the terminal is on a different account
             acc = mt5.account_info()
-            if acc and acc.login == login and acc.server == server:
-                log("Already logged in to correct account")
+            if same_account(acc):
+                log(f"Terminal already logged in to {acc.login} on {acc.server} - no re-login needed")
+                server = acc.server  # use the exact server spelling from MT5
                 login_ok = True
             else:
+                if acc:
+                    log(f"Switching terminal from {acc.login} ({acc.server}) to {login} ({server}). "
+                        f"Note: MT5 disables Algo Trading after an account change.")
                 log(f"Logging in to account {login} on server {server}...")
                 login_ok = mt5.login(login=login, password=password, server=server)
 
@@ -540,10 +548,7 @@ class MT5SessionManager:
                 log(f"login() failed. Code: {err_code}, Msg: {err_msg}. {hint}")
                 diagnostics.login = "FAIL"
                 diagnostics.login_error = f"{err_msg} (Code {err_code}). {hint}"
-                try:
-                    mt5.shutdown()
-                except Exception:
-                    pass
+                self._restore_previous_session(log)
                 return False, f"Login failed: {err_msg}. {hint}", None, diagnostics
 
             diagnostics.login = "PASS"
@@ -560,10 +565,7 @@ class MT5SessionManager:
                 log(f"account_info() returned None. Code: {err_code}")
                 diagnostics.account_info = "FAIL"
                 diagnostics.login_error = f"Account info unavailable after login: {err_msg}"
-                try:
-                    mt5.shutdown()
-                except Exception:
-                    pass
+                self._restore_previous_session(log)
                 return False, "Failed to retrieve account data after login.", None, diagnostics
 
             diagnostics.connected_account = acc.login
@@ -575,25 +577,21 @@ class MT5SessionManager:
                 log(msg)
                 diagnostics.account_info = "FAIL"
                 diagnostics.login_error = msg
-                try:
-                    mt5.shutdown()
-                except Exception:
-                    pass
+                self._restore_previous_session(log)
                 return False, msg, None, diagnostics
 
-            if acc.server != server:
+            if (acc.server or "").lower() != server.lower():
                 msg = f"Server mismatch. Expected {server}, got {acc.server}."
                 log(msg)
                 diagnostics.account_info = "FAIL"
                 diagnostics.login_error = msg
-                try:
-                    mt5.shutdown()
-                except Exception:
-                    pass
+                self._restore_previous_session(log)
                 return False, msg, None, diagnostics
 
             diagnostics.account_info = "PASS"
             diagnostics.final_status = "CONNECTED"
+            if term is not None and not term.trade_allowed:
+                log("WARNING: Algo Trading is OFF in the MT5 terminal. Click 'Algo Trading' (Ctrl+E) in MT5 before starting the bot.")
 
             trade_mode = "Demo" if acc.trade_mode == 0 else ("Contest" if acc.trade_mode == 1 else "Real")
             margin_lvl = round(acc.margin_level, 1) if acc.margin > 0 else 0.0
@@ -625,15 +623,13 @@ class MT5SessionManager:
             err_msg = f"Unexpected exception during MT5 connection: {str(e)}"
             log(f"ERROR: {err_msg}")
             diagnostics.login_error = err_msg
-            try:
-                mt5.shutdown()
-            except Exception:
-                pass
+            self._restore_previous_session(log)
             return False, err_msg, None, diagnostics
 
     def fetch_account_preview(self, login: int, password: str, server: str, broker: str = "", custom_terminal_path: Optional[str] = None) -> AccountPreview:
+        step_logs: List[str] = []
         success, msg, preview, diagnostics = self._establish_mt5_connection(
-            login, password, server, custom_terminal_path
+            login, password, server, custom_terminal_path, log_callback=step_logs.append
         )
         if success and preview:
             # Store validated credentials in memory for Step 4
@@ -651,7 +647,8 @@ class MT5SessionManager:
                 account_number=login,
                 status="Failed",
                 error_reason=msg,
-                diagnostic_logs=preview.diagnostic_logs if preview else [f"Failed: {msg}"]
+                # keep the step-by-step logs so the dashboard can show where it failed
+                diagnostic_logs=step_logs + [f"[ERROR] Failed: {msg}"]
             )
 
     def auto_connect_running_terminal(self) -> Tuple[bool, str, AccountInfo]:
@@ -702,7 +699,7 @@ class MT5SessionManager:
         target_terminal_path = custom_terminal_path
         if self.latest_validated_credentials:
             cached = self.latest_validated_credentials
-            if cached.get("login") == login and cached.get("server") == server:
+            if cached.get("login") == login and str(cached.get("server", "")).lower() == server.strip().lower():
                 target_password = cached.get("password")
                 target_terminal_path = cached.get("terminal_path")
                 logger.info(f"[SESSION MANAGER] Reusing verified credentials for account {login} on {server}.")
@@ -718,6 +715,7 @@ class MT5SessionManager:
             acc_info.last_error = msg
             return False, msg, acc_info, diagnostics
 
+        server = preview.server or server  # exact spelling reported by MT5
         self.active_login = login
         self.active_password = target_password
         self.active_server = server
@@ -763,6 +761,16 @@ class MT5SessionManager:
         use_live_backup = self.use_live_mt5
         state_backup = self.connection_state
         
+        # Refreshing the account the terminal is already on: just read it. Switching
+        # accounts (below) makes MT5 turn Algo Trading off, so avoid it when possible.
+        if MT5_AVAILABLE and self.use_live_mt5:
+            try:
+                cur = mt5.account_info()
+                if cur and cur.login == sa.login and (cur.server or "").lower() == sa.server.lower():
+                    return self.get_account_info()
+            except Exception:
+                pass
+
         try:
             # Disconnect current
             if MT5_AVAILABLE:
@@ -851,6 +859,13 @@ class MT5SessionManager:
             return False
             
         try:
+            # 0. Still attached and on the right account? Nothing to do (a re-login
+            #    would make MT5 turn Algo Trading off).
+            cur = mt5.account_info()
+            if cur and cur.login == self.active_login and (cur.server or "").lower() == str(self.active_server or "").lower():
+                self.connection_state = ConnectionState.CONNECTED
+                return True
+
             # 1. Try raw login first
             if mt5.login(login=self.active_login, password=self.active_password, server=self.active_server):
                 self.connection_state = ConnectionState.CONNECTED

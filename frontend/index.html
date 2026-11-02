@@ -14,7 +14,7 @@
         rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css?v=20261102a">
 </head>
 
 <body class="dark-theme">
@@ -261,61 +261,45 @@
             <div class="sidebar-section">
                 <h3 class="section-title"><i class="fa-solid fa-shield-halved"></i> Live Risk & Protection Monitor</h3>
                 <div class="structure-info">
-                    <div class="info-row" data-risk-field="cfg-trading-mode">
-                        <span>Strategy Mode:</span>
-                        <strong id="risk-mode-badge" class="text-cyan">BALANCED</strong>
-                    </div>
-                    <div class="info-row" data-risk-field="cfg-entry-confirmation-mode">
-                        <span>Entry Confirmation:</span>
-                        <strong id="risk-entry-confirm-badge" class="text-emerald">IMMEDIATE</strong>
+                    <div class="info-row" data-risk-field="cfg-strategy-profile">
+                        <span>Strategy:</span>
+                        <strong id="risk-strategy-badge" class="text-cyan">DONCHIAN TREND</strong>
                     </div>
                     <div class="info-row" data-risk-field="cfg-lot-mode">
-                        <span>Lot Sizing Mode:</span>
-                        <strong id="risk-lot-mode-badge" class="text-cyan">FIXED LOT</strong>
+                        <span>Lot Sizing:</span>
+                        <strong id="risk-lot-mode-badge" class="text-cyan">DYNAMIC RISK</strong>
                     </div>
                     <div class="info-row" data-risk-field="cfg-user-lot">
-                        <span>Target Order Volume:</span>
-                        <strong id="risk-target-vol-badge" class="text-emerald">0.10 Lots</strong>
+                        <span>Order Volume:</span>
+                        <strong id="risk-target-vol-badge" class="text-emerald">DYNAMIC RISK</strong>
                     </div>
                     <div class="info-row" data-risk-field="cfg-max-allowed-lot">
-                        <span>Max Allowed Cap:</span>
-                        <strong id="risk-max-lot-badge" class="text-amber">1.00 Lots</strong>
+                        <span>Max Lot Cap:</span>
+                        <strong id="risk-max-lot-badge" class="text-amber">0.05 Lots</strong>
                     </div>
                     <div class="info-row" data-risk-field="cfg-max-risk">
                         <span>Risk Per Trade:</span>
                         <strong id="risk-pct-badge" class="text-emerald">1.0% Equity</strong>
                     </div>
-                    <div class="info-row" data-risk-field="cfg-min-rr">
-                        <span>Min Risk/Reward:</span>
-                        <strong id="risk-rr-badge">1 : 2.0</strong>
-                    </div>
                     <div class="info-row" data-risk-field="cfg-daily-loss">
                         <span>Daily Loss Limit:</span>
-                        <strong id="risk-daily-limit-badge" class="text-amber">3.0% ($500)</strong>
+                        <strong id="risk-daily-limit-badge" class="text-amber">3.0%</strong>
                     </div>
                     <div class="info-row" data-risk-field="cfg-weekly-loss">
                         <span>Weekly Loss Limit:</span>
-                        <strong id="risk-weekly-limit-badge" class="text-amber">7.0% Balance</strong>
+                        <strong id="risk-weekly-limit-badge" class="text-amber">7.1% Balance</strong>
                     </div>
-                    <div class="info-row" data-risk-field="cfg-auto-breakeven">
-                        <span>Auto-Breakeven:</span>
-                        <strong id="risk-be-badge" class="text-emerald">Active @ 1.0R</strong>
+                    <div class="info-row" data-risk-field="cfg-max-consecutive-losses">
+                        <span>Loss Streak Pause:</span>
+                        <strong id="risk-consec-badge" class="text-muted">Off</strong>
                     </div>
-                    <div class="info-row" data-risk-field="cfg-auto-trailing">
-                        <span>Auto-Trailing Stop:</span>
-                        <strong id="risk-trailing-badge" class="text-emerald">Active (1.2x ATR)</strong>
+                    <div class="info-row" data-risk-field="cfg-max-per-direction">
+                        <span>Stacking Guard:</span>
+                        <strong id="risk-stacking-badge" class="text-emerald">1 per direction</strong>
                     </div>
-                    <div class="info-row" data-risk-field="cfg-htf-filter">
-                        <span>HTF Trend Filter:</span>
-                        <strong id="risk-htf-badge" class="text-emerald">STRICT (1H/4H)</strong>
-                    </div>
-                    <div class="info-row" data-risk-field="cfg-session-filter">
-                        <span>Session Filter:</span>
-                        <strong id="risk-session-badge" class="text-cyan">LONDON & NY</strong>
-                    </div>
-                    <div class="info-row" data-risk-field="cfg-toxic-setups">
-                        <span>Toxic Setups:</span>
-                        <strong id="risk-toxic-badge" class="text-emerald">ELIMINATED</strong>
+                    <div class="info-row" data-risk-field="cfg-blocked-hours">
+                        <span>Blocked Hours:</span>
+                        <strong id="risk-hours-badge" class="text-muted">None</strong>
                     </div>
                     <div class="info-row" data-risk-field="cfg-enable-live-trading">
                         <span>Live Trading Mode:</span>
@@ -477,88 +461,56 @@
                     </div>
                 </div>
 
-                <div class="ai-decision-row-top">
-                    <!-- Left: AI Confidence Card -->
-                    <div class="confidence-card">
+                <!-- Donchian Trend strategy panel (replaces the legacy score / 5-pillar boxes) -->
+                <div class="dt-panel" id="dt-panel">
+                    <!-- 1. Breakout watch -->
+                    <div class="dt-card">
                         <div class="card-header">
-                            <h3><i class="fa-solid fa-square-poll-vertical"></i> Heuristic Strategy Model Score</h3>
-                            <span class="badge-score" id="ai-confidence-badge">78.5% SCORE</span>
+                            <h3><i class="fa-solid fa-arrows-up-down"></i> Breakout Watch <span class="dt-sub" id="dt-sub">H1 &middot; 100 candles</span></h3>
+                            <span class="dt-signal dt-signal-none" id="dt-signal">WAITING</span>
                         </div>
-
-                        <div class="probability-bars">
-                            <div class="prob-row">
-                                <span class="prob-lbl text-emerald">BUY Score</span>
-                                <div class="progress-bar-bg">
-                                    <div class="progress-bar-fill bg-emerald" id="prob-buy-fill" style="width: 68%;">
-                                    </div>
-                                </div>
-                                <span class="prob-pct" id="prob-buy-pct">68.0%</span>
+                        <div class="dt-channel">
+                            <div class="dt-level dt-level-high">
+                                <span>BUY above</span><strong id="dt-high">--</strong>
+                                <em id="dt-to-buy">--</em>
                             </div>
-
-                            <div class="prob-row">
-                                <span class="prob-lbl text-red">SELL Score</span>
-                                <div class="progress-bar-bg">
-                                    <div class="progress-bar-fill bg-red" id="prob-sell-fill" style="width: 32%;"></div>
-                                </div>
-                                <span class="prob-pct" id="prob-sell-pct">32.0%</span>
+                            <div class="dt-bar" title="Last closed H1 candle inside the 100-candle channel">
+                                <div class="dt-bar-fill" id="dt-bar-fill"></div>
+                                <div class="dt-bar-marker" id="dt-bar-marker"><span id="dt-close">--</span></div>
+                            </div>
+                            <div class="dt-level dt-level-low">
+                                <span>SELL below</span><strong id="dt-low">--</strong>
+                                <em id="dt-to-sell">--</em>
                             </div>
                         </div>
+                        <div class="dt-trend" id="dt-trend">Daily trend: --</div>
+                        <div class="dt-trend" id="dt-news">News: --</div>
+                        <p class="dt-note" id="dt-signal-text">Loading strategy status...</p>
+                    </div>
 
-                        <!-- Top Feature Attribution (Explainable Heuristics) -->
-                        <div class="feature-attribution">
-                            <h4>Key Technical Factors (Weights)</h4>
-                            <div class="features-grid" id="ai-features-container">
-                                <div class="feature-tag"><span>RSI_14</span> <strong>0.85</strong></div>
-                                <div class="feature-tag"><span>Stoch_RSI</span> <strong>0.78</strong></div>
-                                <div class="feature-tag"><span>MACD_Hist</span> <strong>0.64</strong></div>
-                                <div class="feature-tag"><span>Dist_VWAP</span> <strong>0.52</strong></div>
-                            </div>
+                    <!-- 2. Next trade plan -->
+                    <div class="dt-card">
+                        <div class="card-header">
+                            <h3><i class="fa-solid fa-clipboard-check"></i> Next Trade Plan</h3>
+                            <span class="dt-chip" id="dt-strategy-chip">DONCHIAN TREND</span>
+                        </div>
+                        <div class="dt-stats">
+                            <div><span id="dt-atr-label">ATR (14, H1)</span><strong id="dt-atr">--</strong></div>
+                            <div><span>Stop loss distance</span><strong id="dt-stop">--</strong><em>3 &times; ATR</em></div>
+                            <div><span>Trailing distance</span><strong id="dt-trail">--</strong><em>4 &times; ATR</em></div>
+                            <div><span>Lot size</span><strong id="dt-lot">--</strong><em id="dt-lot-note"></em></div>
+                            <div class="dt-wide"><span>Risk if stopped out</span><strong id="dt-risk">--</strong></div>
                         </div>
                     </div>
 
-                    <!-- Right: 5-Pillar Decision Matrix -->
-                    <div class="confirmation-matrix-card">
+                    <!-- 3. Open trades -->
+                    <div class="dt-card">
                         <div class="card-header">
-                            <h3><i class="fa-solid fa-shield-halved"></i> 5-Pillar Decision Matrix</h3>
-                            <span class="badge-status-pass" id="matrix-status-badge">SCORE: 76.0% (PASSED)</span>
+                            <h3><i class="fa-solid fa-route"></i> Open Trades &amp; Trailing Stop</h3>
+                            <span class="dt-chip" id="dt-pos-count">0 OPEN</span>
                         </div>
-
-                        <div class="pillars-list">
-                            <div class="pillar-item">
-                                <span>1. Trend Alignment (25%)</span>
-                                <div class="pillar-bar">
-                                    <div class="fill" id="pil-trend" style="width: 100%;"></div>
-                                </div>
-                                <strong id="val-trend">100%</strong>
-                            </div>
-                            <div class="pillar-item">
-                                <span>2. Market Structure (25%)</span>
-                                <div class="pillar-bar">
-                                    <div class="fill" id="pil-struct" style="width: 75%;"></div>
-                                </div>
-                                <strong id="val-struct">75%</strong>
-                            </div>
-                            <div class="pillar-item">
-                                <span>3. Momentum & Volume (20%)</span>
-                                <div class="pillar-bar">
-                                    <div class="fill" id="pil-mom" style="width: 90%;"></div>
-                                </div>
-                                <strong id="val-mom">90%</strong>
-                            </div>
-                            <div class="pillar-item">
-                                <span>4. Heuristic Model Score (20%)</span>
-                                <div class="pillar-bar">
-                                    <div class="fill" id="pil-ai" style="width: 78%;"></div>
-                                </div>
-                                <strong id="val-ai">78%</strong>
-                            </div>
-                            <div class="pillar-item">
-                                <span>5. Risk & News Filter (10%)</span>
-                                <div class="pillar-bar">
-                                    <div class="fill" id="pil-risk" style="width: 100%;"></div>
-                                </div>
-                                <strong id="val-risk">100%</strong>
-                            </div>
+                        <div id="dt-positions" class="dt-positions">
+                            <p class="dt-note">No open trades. The bot waits for a breakout, then manages the stop automatically.</p>
                         </div>
                     </div>
                 </div>
@@ -971,258 +923,127 @@
             </div>
             <div class="modal-body">
                 <form id="form-risk-settings">
-                    <div class="grid-2col">
-                        <div class="control-group" data-risk-field="cfg-trading-mode">
-                            <label>AI Trading Strategy Profile</label>
-                            <select id="cfg-trading-mode" class="form-control">
-                                <option value="CONSERVATIVE">CONSERVATIVE (78%+ Confidence, 1:2.5+ Risk/Reward)</option>
-                                <option value="BALANCED" selected>BALANCED (72%+ Confidence, 1:2.0+ Risk/Reward)
-                                </option>
-                                <option value="AGGRESSIVE">AGGRESSIVE (65%+ Confidence, 1:1.5+ Risk/Reward)</option>
-                            </select>
-                        </div>
+                    <h4 style="margin:16px 0 4px;font-size:13px;color:var(--accent-cyan);text-transform:uppercase;letter-spacing:.05em;">1. Strategy</h4>
+                    <div class="grid-2col margin-top-sm">
                         <div class="control-group" data-risk-field="cfg-strategy-profile">
-                            <label>Gold Engine Execution Strategy</label>
-                            <select id="cfg-strategy-profile" class="form-control">
-                                <option value="HYBRID_AUTO" selected>HYBRID AUTO (Dark Venus BB + Institutional Engine)
-                                </option>
-                                <option value="BB_MEAN_REVERSION">BB MEAN REVERSION (Dark Venus Band Reversion)</option>
-                                <option value="BB_TREND_FOLLOWING">BB TREND FOLLOWING (Band Continuation & Central
-                                    Cross)</option>
-                                <option value="BB_BREAKOUT">BB BREAKOUT (Band & Squeeze Expansion Breakout)</option>
-                                <option value="INSTITUTIONAL_ONLY">INSTITUTIONAL ONLY (Structure, Sweeps & Order Blocks)
-                                </option>
-                            </select>
+                            <label>Trading Strategy</label>
+                            <select id="cfg-strategy-profile" class="form-control"><option value="DONCHIAN_TREND">DONCHIAN TREND (backtested 2015-2026, recommended)</option><option value="HYBRID_AUTO">LEGACY MULTI-SETUP (not recommended, lost money)</option></select>
+                        </div>
+                        <div class="control-group" data-risk-field="cfg-donchian-tf">
+                            <label>Trading Timeframe (one at a time)</label>
+                            <select id="cfg-donchian-tf" class="form-control"><option value="H1">H1 &mdash; safer: smaller drawdown, handles wider spreads</option><option value="M15">M15 &mdash; more trades &amp; profit in tests, more sensitive to spread</option></select>
+                            <small class="text-muted">Cannot be changed while a gold trade is open.</small>
                         </div>
                     </div>
-
+                    <div id="cfg-strategy-info" class="text-muted" style="font-size:12px;margin-top:6px;line-height:1.5;">
+                        Candle closes beyond the channel high/low (H1: 100 candles, M15: 400 candles) &rarr; trade in that direction,
+                        only with the daily trend (200-day average). Stop = 3&times;ATR, trailing stop = 4&times;ATR, no fixed TP.<br>
+                        Backtest 2015-2026: <b>H1</b> ~32 trades/yr, +82R, max drawdown 27R &middot; <b>M15</b> ~62 trades/yr, +132R, max drawdown 40R.
+                    </div>
+                    <h4 style="margin:16px 0 4px;font-size:13px;color:var(--accent-cyan);text-transform:uppercase;letter-spacing:.05em;">2. Position Size</h4>
                     <div class="grid-2col margin-top-sm">
-                        <div class="control-group" data-risk-field="cfg-signal-mode">
-                            <label>Signal Evaluation Mode</label>
-                            <select id="cfg-signal-mode" class="form-control">
-                                <option value="CLOSED_CANDLE" selected>CLOSED CANDLE (Safer — Confirmed Candle
-                                    Execution)</option>
-                                <option value="CURRENT_CANDLE">CURRENT CANDLE (Fast — Real-Time Forming Candle)</option>
-                            </select>
-                        </div>
                         <div class="control-group" data-risk-field="cfg-lot-mode">
                             <label>Position Sizing Mode</label>
-                            <select id="cfg-lot-mode" class="form-control">
-                                <option value="DYNAMIC_RISK" selected>DYNAMIC RISK (Risk % & SL Distance Sizing)</option>
-                                <option value="FIXED">FIXED LOT (User Specified Volume)</option>
-                            </select>
+                            <select id="cfg-lot-mode" class="form-control"><option value="DYNAMIC_RISK">DYNAMIC RISK (lot from Risk % and stop, recommended)</option><option value="FIXED">FIXED LOT</option></select>
+                        </div>
+                        <div class="control-group" data-risk-field="cfg-max-risk">
+                            <label>Risk Per Trade (% of equity)</label>
+                            <input type="number" step="0.1" min="0.1" id="cfg-max-risk" class="form-control" value="1.0">
+                            <small class="text-muted">Recommended: 0.5 - 1%</small>
                         </div>
                     </div>
-
-                    <div class="control-group margin-top-sm" data-risk-field="cfg-entry-confirmation-mode">
-                        <label>Entry Confirmation Mechanism</label>
-                        <select id="cfg-entry-confirmation-mode" class="form-control">
-                            <option value="IMMEDIATE" selected>IMMEDIATE (Execute immediately on signal — Default)
-                            </option>
-                            <option value="CONFIRM_NEXT_CANDLE">CONFIRM NEXT CANDLE (Wait for next candle close
-                                confirmation)</option>
-                        </select>
-                    </div>
-
-                    <div class="grid-2col margin-top-sm">
-                        <div class="control-group" data-risk-field="cfg-bb-period">
-                            <label>Dark Venus BB Period</label>
-                            <input type="number" id="cfg-bb-period" class="form-control" value="20">
-                        </div>
-                        <div class="control-group" data-risk-field="cfg-bb-std">
-                            <label>Dark Venus BB Standard Deviation</label>
-                            <input type="number" step="0.1" id="cfg-bb-std" class="form-control" value="2.0">
-                        </div>
-                    </div>
-
                     <div class="grid-2col margin-top-sm">
                         <div class="control-group" data-risk-field="cfg-user-lot">
-                            <label>Fixed Lot Size (Lots)</label>
-                            <input type="number" step="0.01" id="cfg-user-lot" class="form-control" value="0.01">
+                            <label>Fixed Lot Size (FIXED mode only)</label>
+                            <input type="number" step="0.01" min="0.01" id="cfg-user-lot" class="form-control" value="0.01">
                         </div>
                         <div class="control-group" data-risk-field="cfg-max-allowed-lot">
-                            <label>Maximum Allowed Lot Cap</label>
-                            <input type="number" step="0.01" id="cfg-max-allowed-lot" class="form-control" value="1.00">
+                            <label>Maximum Lot (hard cap)</label>
+                            <input type="number" step="0.01" min="0.01" id="cfg-max-allowed-lot" class="form-control" value="0.05">
+                            <small class="text-muted">Orders above this are blocked</small>
                         </div>
                     </div>
-
+                    <h4 style="margin:16px 0 4px;font-size:13px;color:var(--accent-cyan);text-transform:uppercase;letter-spacing:.05em;">3. Loss Limits</h4>
                     <div class="grid-2col margin-top-sm">
-                        <div class="control-group" data-risk-field="cfg-max-risk">
-                            <label>Max Risk Per Trade (%)</label>
-                            <input type="number" step="0.1" id="cfg-max-risk" class="form-control" value="1.0">
-                        </div>
-                        <div class="control-group" data-risk-field="cfg-min-rr">
-                            <label>Min Risk/Reward Ratio</label>
-                            <select id="cfg-min-rr" class="form-control">
-                                <option value="1.5">1 : 1.5</option>
-                                <option value="2.0" selected>1 : 2.0</option>
-                                <option value="3.0">1 : 3.0</option>
-                                <option value="4.0">1 : 4.0</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <div class="grid-2col">
                         <div class="control-group" data-risk-field="cfg-daily-loss">
-                            <label>Daily Loss Circuit Breaker (%)</label>
-                            <input type="number" step="0.1" id="cfg-daily-loss" class="form-control" value="3.0">
+                            <label>Daily Loss Limit (% of balance)</label>
+                            <input type="number" step="0.1" min="0.1" id="cfg-daily-loss" class="form-control" value="3.0">
                         </div>
                         <div class="control-group" data-risk-field="cfg-max-daily-loss-amt">
-                            <label>Max Daily Loss Amount ($)</label>
-                            <input type="number" step="any" min="0" id="cfg-max-daily-loss-amt" class="form-control"
-                                value="500">
+                            <label>Daily Loss Limit ($)</label>
+                            <input type="number" step="any" min="0" id="cfg-max-daily-loss-amt" class="form-control" value="0">
+                            <small class="text-muted">0 = off (use the % limit)</small>
                         </div>
                     </div>
-
                     <div class="grid-2col margin-top-sm">
                         <div class="control-group" data-risk-field="cfg-weekly-loss">
-                            <label>Weekly Loss Circuit Breaker (%)</label>
-                            <input type="number" step="0.1" min="0.1" max="100.0" id="cfg-weekly-loss"
-                                class="form-control" value="7.0">
+                            <label>Weekly Loss Limit (% of balance)</label>
+                            <input type="number" step="0.1" min="0.1" id="cfg-weekly-loss" class="form-control" value="7.0" max="100.0">
                         </div>
-                        <div class="control-group"
-                            style="display: flex; flex-direction: column; justify-content: flex-end;">
+                        <div class="control-group" style="display: flex; flex-direction: column; justify-content: flex-end;">
                             <button type="button" class="btn btn-amber btn-block" id="btn-reset-weekly-loss"
                                 title="Manually clear current weekly trading lock and reset weekly loss counter for testing session">
                                 <i class="fa-solid fa-rotate-left"></i> Reset Weekly Loss Lock
                             </button>
                         </div>
                     </div>
-
-                    <div class="grid-2col">
+                    <div class="grid-2col margin-top-sm">
+                        <div class="control-group" data-risk-field="cfg-max-consecutive-losses">
+                            <label>Pause After Consecutive Losses</label>
+                            <input type="number" step="1" min="0" id="cfg-max-consecutive-losses" class="form-control" value="0" max="50">
+                            <small class="text-muted">0 = off. Pause lasts 24h. This strategy can lose 15 in a row.</small>
+                        </div>
+                    </div>
+                    <h4 style="margin:16px 0 4px;font-size:13px;color:var(--accent-cyan);text-transform:uppercase;letter-spacing:.05em;">4. Entry Protection</h4>
+                    <div class="grid-2col margin-top-sm">
                         <div class="control-group" data-risk-field="cfg-max-positions">
-                            <label>Max Open Positions</label>
-                            <input type="number" id="cfg-max-positions" class="form-control" value="5">
+                            <label>Max Open Positions (total)</label>
+                            <input type="number" step="1" min="1" id="cfg-max-positions" class="form-control" value="2">
                         </div>
-                        <div class="control-group" data-risk-field="cfg-default-lot">
-                            <label>Default / Fallback Lot Size</label>
-                            <input type="number" step="0.01" id="cfg-default-lot" class="form-control" value="0.01">
-                        </div>
-                    </div>
-
-                    <div class="grid-2col">
-                        <div class="control-group" data-risk-field="cfg-auto-breakeven">
-                            <label>Auto-Breakeven Protection</label>
-                            <select id="cfg-auto-breakeven" class="form-control">
-                                <option value="true" selected>ENABLED (Shift SL to Break-Even at 1.0R)</option>
-                                <option value="false">DISABLED</option>
-                            </select>
-                        </div>
-                        <div class="control-group" data-risk-field="cfg-break-even-rr">
-                            <label>Break-Even Trigger (R:R Ratio)</label>
-                            <input type="number" step="0.1" min="0.5" max="3.0" id="cfg-break-even-rr" class="form-control" value="1.0">
+                        <div class="control-group" data-risk-field="cfg-max-per-direction">
+                            <label>Max Positions Per Direction</label>
+                            <input type="number" step="1" min="0" id="cfg-max-per-direction" class="form-control" value="1">
+                            <small class="text-muted">Stops BUY-on-BUY stacking. 0 = off</small>
                         </div>
                     </div>
-
                     <div class="grid-2col margin-top-sm">
-                        <div class="control-group" data-risk-field="cfg-auto-trailing">
-                            <label>Auto-Trailing Stop</label>
-                            <select id="cfg-auto-trailing" class="form-control">
-                                <option value="true" selected>ENABLED (Trail SL at 1.2x ATR)</option>
-                                <option value="false">DISABLED</option>
-                            </select>
+                        <div class="control-group" data-risk-field="cfg-min-entry-gap">
+                            <label>Minimum Minutes Between Entries</label>
+                            <input type="number" step="1" min="0" id="cfg-min-entry-gap" class="form-control" value="30">
+                            <small class="text-muted">0 = off</small>
                         </div>
-                        <div class="control-group" data-risk-field="cfg-giveback-guard">
-                            <label>Giveback Guard</label>
-                            <select id="cfg-giveback-guard" class="form-control">
-                                <option value="false" selected>DISABLED (Recommended - Let Trades Run to BE/TP)</option>
-                                <option value="true">ENABLED (Tight Scalp Retrace Guard)</option>
-                            </select>
+                        <div class="control-group" data-risk-field="cfg-max-daily-trades">
+                            <label>Max Trades Per Day</label>
+                            <input type="number" step="1" min="1" id="cfg-max-daily-trades" class="form-control" value="8">
                         </div>
                     </div>
-
-                    <div class="grid-2col margin-top-sm">
-                        <div class="control-group" data-risk-field="cfg-htf-filter">
-                            <label>HTF Trend Alignment Filter</label>
-                            <select id="cfg-htf-filter" class="form-control">
-                                <option value="STRICT" selected>STRICT (H1 & H4 Trend Must Fully Align)</option>
-                                <option value="MODERATE">MODERATE (H1 Trend Aligns)</option>
-                                <option value="DISABLED">DISABLED (Trade Any Direction)</option>
-                            </select>
-                        </div>
-                        <div class="control-group" data-risk-field="cfg-session-filter">
-                            <label>Allowed Trading Sessions</label>
-                            <select id="cfg-session-filter" class="form-control">
-                                <option value="LONDON_NY" selected>LONDON & NEW YORK ONLY (Block Asian Chop)</option>
-                                <option value="ALL">ALL SESSIONS (Including Asian Session)</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <div class="grid-2col margin-top-sm">
-                        <div class="control-group" data-risk-field="cfg-toxic-setups">
-                            <label>Toxic Setup Filter (Loss Prevention)</label>
-                            <select id="cfg-toxic-setups" class="form-control">
-                                <option value="BLOCKED" selected>ELIMINATE TOXIC SETUPS (Block BB Midline, BOS & F Volume)</option>
-                                <option value="ALLOWED">ALLOW ALL SETUPS (No Setups Blocked)</option>
-                            </select>
-                        </div>
-                        <div class="control-group" data-risk-field="cfg-trailing-pips">
-                            <label>Trailing Stop Distance (Pips)</label>
-                            <input type="number" step="1" id="cfg-trailing-pips" class="form-control" value="15">
-                        </div>
-                    </div>
-
-                    <div class="grid-2col margin-top-sm">
-                        <div class="control-group" data-risk-field="cfg-min-confidence">
-                            <label>Min AI Confidence Score</label>
-                            <input type="number" step="0.05" min="0.50" max="0.95" id="cfg-min-confidence"
-                                class="form-control" value="0.70">
-                        </div>
-                        <div class="control-group" data-risk-field="cfg-trailing-activation-rr">
-                            <label>Trailing Activation (R:R Ratio)</label>
-                            <input type="number" step="0.1" min="0.1" max="5.0" id="cfg-trailing-activation-rr"
-                                class="form-control" value="1.2">
-                        </div>
-                    </div>
-
-                    <div class="grid-2col margin-top-sm">
-                        <div class="control-group" data-risk-field="cfg-trailing-atr-mult">
-                            <label>Dynamic ATR Trailing Multiplier</label>
-                            <input type="number" step="0.1" min="0.5" max="5.0" id="cfg-trailing-atr-mult"
-                                class="form-control" value="2.0">
-                        </div>
-                    </div>
-
-                    <div class="grid-2col margin-top-sm">
-                        <div class="control-group" data-risk-field="cfg-auto-trade-enabled">
-                            <label>Automated Trading Engine</label>
-                            <select id="cfg-auto-trade-enabled" class="form-control">
-                                <option value="false" selected>DISABLED (Manual / Signal Mode)</option>
-                                <option value="true">ENABLED (Fully Autonomous Mode)</option>
-                            </select>
-                        </div>
-                        <div class="control-group" data-risk-field="cfg-auto-cooldown">
-                            <label>Auto-Trade Cooldown (Seconds)</label>
-                            <input type="number" step="5" min="0" max="3600" id="cfg-auto-cooldown" class="form-control"
-                                value="300">
-                        </div>
-                    </div>
-
                     <div class="grid-2col margin-top-sm">
                         <div class="control-group" data-risk-field="cfg-max-spread">
-                            <label>Max Allowed Spread (Pips)</label>
-                            <input type="number" step="0.1" min="0.1" max="20.0" id="cfg-max-spread"
-                                class="form-control" value="2.5">
+                            <label>Max Spread (pips)</label>
+                            <input type="number" step="0.1" min="0.1" id="cfg-max-spread" class="form-control" value="3.0" max="20.0">
                         </div>
-                        <div class="control-group" data-risk-field="cfg-max-consecutive-losses">
-                            <label>Max Consecutive Loss Limit</label>
-                            <input type="number" step="1" min="1" max="20" id="cfg-max-consecutive-losses"
-                                class="form-control" value="5">
+                        <div class="control-group" data-risk-field="cfg-blocked-hours">
+                            <label>Blocked Hours (PC clock, 0-23)</label>
+                            <input type="text" id="cfg-blocked-hours" class="form-control" placeholder="e.g. 18,19,20" value="">
+                            <small class="text-muted">Comma separated. Empty = trade all hours</small>
                         </div>
                     </div>
-
+                                        <div class="grid-2col margin-top-sm">
+                        <div class="control-group" data-risk-field="cfg-news-filter">
+                            <label>High-Impact News Filter</label>
+                            <select id="cfg-news-filter" class="form-control"><option value="true">ON &mdash; no new trades 30 min before/after big USD news</option><option value="false">OFF</option></select>
+                            <small class="text-muted">Live Forex Factory calendar (NFP, CPI, FOMC...). Open trades are not closed.</small>
+                        </div>
+                    </div>
+<h4 style="margin:16px 0 4px;font-size:13px;color:var(--accent-cyan);text-transform:uppercase;letter-spacing:.05em;">5. Automation</h4>
                     <div class="grid-2col margin-top-sm">
-                        <div class="control-group" data-risk-field="cfg-max-daily-trades">
-                            <label>Max Automated Trades Per Day</label>
-                            <input type="number" step="1" id="cfg-max-daily-trades" class="form-control" value="10">
+                        <div class="control-group" data-risk-field="cfg-auto-trade-enabled">
+                            <label>Automated Trading</label>
+                            <select id="cfg-auto-trade-enabled" class="form-control"><option value="false">DISABLED (signals only)</option><option value="true">ENABLED (bot places trades)</option></select>
                         </div>
                         <div class="control-group" data-risk-field="cfg-enable-live-trading">
-                            <label>Live Trading Safety Lock (ENABLE_LIVE_TRADING)</label>
-                            <select id="cfg-enable-live-trading" class="form-control">
-                                <option value="false" selected>False — DEMO Account Only (Real Blocked)</option>
-                                <option value="true">True — LIVE / Real Account Trading Enabled</option>
-                            </select>
+                            <label>Real Account Safety Lock</label>
+                            <select id="cfg-enable-live-trading" class="form-control"><option value="false">DEMO ONLY (real accounts blocked)</option><option value="true">LIVE ENABLED (real money)</option></select>
                         </div>
                     </div>
 
@@ -1235,6 +1056,69 @@
                             title="Reset testing session circuit breaker baselines (Daily Loss, Weekly Loss, Drawdown Peak, Consec Losses)">
                             <i class="fa-solid fa-rotate-left"></i> Reset Testing Baseline
                         </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modify SL / TP of an open position -->
+    <div class="modal-overlay hidden" id="modal-modify-sltp">
+        <div class="modal-card modal-md" style="max-width: 520px;">
+            <div class="modal-header">
+                <h2><i class="fa-solid fa-pen-to-square"></i> Modify SL / TP <span id="msl-ticket" class="text-muted" style="font-size:0.8em;"></span></h2>
+                <button class="btn-close-modal" id="btn-close-modify-sltp">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="msl-info">
+                    <div><span>Position</span><b id="msl-side"></b></div>
+                    <div><span>Entry</span><b id="msl-entry"></b></div>
+                    <div><span>Current price</span><b id="msl-price"></b></div>
+                    <div><span>Profit now</span><b id="msl-pnl"></b></div>
+                    <div><span>Current SL</span><b id="msl-cur-sl"></b></div>
+                    <div><span>Current TP</span><b id="msl-cur-tp"></b></div>
+                </div>
+
+                <form id="form-modify-sltp" autocomplete="off">
+                    <div class="grid-2col margin-top-sm">
+                        <div class="control-group">
+                            <label>New Stop Loss <span class="text-red">*</span></label>
+                            <input type="number" step="any" min="0" id="msl-new-sl" class="form-control" required>
+                            <small id="msl-sl-result" class="msl-result"></small>
+                        </div>
+                        <div class="control-group">
+                            <label>New Take Profit <span class="text-muted">(0 = none)</span></label>
+                            <input type="number" step="any" min="0" id="msl-new-tp" class="form-control">
+                            <small id="msl-tp-result" class="msl-result"></small>
+                        </div>
+                    </div>
+
+                    <div class="msl-quick">
+                        <button type="button" class="btn btn-outline btn-sm" id="msl-btn-breakeven" title="Move the stop to the entry price: the trade can no longer lose (except spread/gaps)">
+                            <i class="fa-solid fa-shield-halved"></i> SL to entry
+                        </button>
+                        <button type="button" class="btn btn-outline btn-sm" id="msl-btn-no-tp" title="Remove the take profit and let the trailing stop handle the exit">
+                            <i class="fa-solid fa-ban"></i> Remove TP
+                        </button>
+                        <button type="button" class="btn btn-outline btn-sm" id="msl-btn-reset" title="Put back the current SL and TP">
+                            <i class="fa-solid fa-rotate-left"></i> Reset
+                        </button>
+                    </div>
+
+                    <div id="msl-warning" class="msl-warning hidden"></div>
+                    <div id="msl-error" class="msl-error hidden"></div>
+
+                    <p class="msl-note">
+                        <i class="fa-solid fa-circle-info"></i>
+                        The bot's trailing stop only moves the SL in your favour. If you move the SL closer, the bot keeps it.
+                        If you move it further away, the bot may pull it back at the next candle close.
+                    </p>
+
+                    <div class="modal-actions-row" style="display: flex; gap: 10px;">
+                        <button type="submit" class="btn btn-cyan" id="msl-btn-save" style="flex: 2;">
+                            <i class="fa-solid fa-floppy-disk"></i> Save SL / TP
+                        </button>
+                        <button type="button" class="btn btn-outline" id="msl-btn-cancel" style="flex: 1;">Cancel</button>
                     </div>
                 </form>
             </div>
@@ -1635,7 +1519,7 @@
         </div>
     </div>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=20261102a"></script>
 </body>
 
 </html>
