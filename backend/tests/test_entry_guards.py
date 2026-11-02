@@ -35,10 +35,10 @@ def _open_trade(side, entry):
                        state=TradeState.OPEN, open_time=datetime.now())
 
 
-def _evaluate(report, active=None):
+def _evaluate(report, active=None, max_consec=999):
     rs = trade_manager.risk_settings
     rs.lot_sizing_mode, rs.user_configured_lot, rs.max_allowed_lot = "FIXED", 0.01, 0.05
-    rs.auto_trade_cooldown_seconds, rs.max_consecutive_losses, rs.max_trades_per_day = 0, 999, 999
+    rs.auto_trade_cooldown_seconds, rs.max_consecutive_losses, rs.max_trades_per_day = 0, max_consec, 999
     with patch("app.adapters.mt5_adapter.mt5_adapter") as mt5, \
          patch.dict(trade_manager.active_trades, {t.trade_id: t for t in (active or [])}, clear=True):
         mt5.is_connected = False

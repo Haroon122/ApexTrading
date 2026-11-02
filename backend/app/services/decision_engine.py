@@ -386,6 +386,10 @@ class DecisionEngine:
         else:
             analysis_candles = candles
             
+        if ticker is None:
+            rejection_reasons.append("Live price unavailable from MT5")
+            return self._build_rejection_report(symbol, timeframe, rejection_reasons, primary_reason="DATA_UNAVAILABLE")
+
         if len(analysis_candles) < 30:
             rejection_reasons.append(f"Insufficient candle history ({len(analysis_candles)}/30 required)")
             return self._build_rejection_report(symbol, timeframe, rejection_reasons, primary_reason="DATA_UNAVAILABLE")

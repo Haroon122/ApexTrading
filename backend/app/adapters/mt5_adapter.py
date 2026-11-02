@@ -196,7 +196,11 @@ class MT5Adapter:
                     )
             except Exception as e:
                 logger.error(f"Live MT5 get_ticker failed: {e}")
-                
+            # Live mode: never fall back to simulated prices, or the bot could
+            # place real orders based on fake data.
+            logger.warning(f"[MT5 ADAPTER] No live tick for {symbol}; returning None (no simulated fallback).")
+            return None
+
         return self._generate_tick(symbol)
 
     def fetch_candles(
@@ -234,7 +238,7 @@ class MT5Adapter:
                 else:
                     rates = mt5.copy_rates_from_pos(symbol, mt5_tf, 0, count)
 
-                if rates is not None and len(rates) >= 40:
+                if rates is not None and len(rates) > 0:
                     candles = []
                     for i, r in enumerate(rates):
                         is_closed = True if (before_datetime is not None or from_datetime is not None) else (i < len(rates) - 1)
@@ -251,6 +255,9 @@ class MT5Adapter:
                     return candles
             except Exception as e:
                 logger.error(f"Live MT5 fetch_candles failed: {e}")
+            # Live mode: return nothing rather than simulated candles (see get_ticker).
+            logger.warning(f"[MT5 ADAPTER] No live {timeframe} candles for {symbol}; returning [] (no simulated fallback).")
+            return []
 
         return self._generate_candles(symbol, timeframe, count, before_datetime, from_datetime, to_datetime)
 
@@ -859,7 +866,21 @@ class MT5Adapter:
                 logger.error(f"Error in close_all_positions: {e}", exc_info=True)
         return closed_count
 
+    def min_stop_distance(self, symbol: str) -> float:
+        """Closest distance (price units) the broker allows SL/TP from the current price."""
+        if not (self.session_manager.use_live_mt5 and MT5_AVAILABLE):
+            return 0.0
+        try:
+            info = mt5.symbol_info(symbol)
+            if not info:
+                return 0.0
+            pts = max(int(getattr(info, "trade_stops_level", 0) or 0), int(getattr(info, "trade_freeze_level", 0) or 0))
+            return pts * float(info.point)
+        except Exception:
+            return 0.0
+
     def update_sl_tp(self, trade_id: str, new_sl: float, new_tp: float) -> bool:
+        self.last_sltp_error = ""
         if not MT5_AVAILABLE or not self.session_manager.use_live_mt5:
             # Paper mode update SL/TP
             from app.services.trade_manager import trade_manager
@@ -903,15 +924,28 @@ class MT5Adapter:
                 result = mt5.order_send(request)
                 last_err = mt5.last_error()
                 logger.info(f"[MT5 UPDATE SLTP] Position {ticket} | Request: {request} | Result: {result} | Last Error: {last_err}")
-                return bool(result and result.retcode in (mt5.TRADE_RETCODE_DONE, mt5.TRADE_RETCODE_PLACED))
+                ok = bool(result and result.retcode in (mt5.TRADE_RETCODE_DONE, mt5.TRADE_RETCODE_PLACED))
+                if not ok:
+                    if result is not None:
+                        self.last_sltp_error = f"MT5 rejected (code {result.retcode}: {getattr(result, 'comment', '')})"
+                    else:
+                        self.last_sltp_error = f"MT5 did not respond ({last_err})"
+                return ok
             except Exception as e:
+                self.last_sltp_error = f"MT5 error: {e}"
                 logger.error(f"Live MT5 update_sl_tp exception: {e}", exc_info=True)
         return False
 
     def get_positions(self) -> List[TradeRecord]:
+        # positions_ok tells callers whether [] means "no positions" or "MT5 call failed".
+        self.positions_ok = True
         if self.session_manager.use_live_mt5 and MT5_AVAILABLE:
             try:
                 raw_pos = mt5.positions_get()
+                if raw_pos is None:
+                    self.positions_ok = False
+                    logger.warning(f"[MT5 ADAPTER] positions_get() failed: {mt5.last_error()}")
+                    return []
                 if raw_pos:
                     from app.services.symbol_specs import calculate_potential_pnl_usd, get_symbol_specs
                     from app.services.trade_manager import trade_manager
@@ -962,6 +996,7 @@ class MT5Adapter:
                         ))
                     return positions
             except Exception as e:
+                self.positions_ok = False
                 logger.error(f"Error fetching live MT5 positions: {e}")
 
         return []

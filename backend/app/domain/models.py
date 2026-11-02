@@ -294,6 +294,8 @@ class RiskSettings(BaseModel):
     max_daily_loss_amount: float = 5.0
     max_open_positions: int = 2
     max_positions_per_direction: int = 1
+    news_filter_enabled: bool = True  # skip new entries 30 min before/after high-impact USD news
+    donchian_timeframe: str = "H1"  # DONCHIAN_TREND entry chart: "H1" or "M15" (one at a time)
     min_minutes_between_entries: float = 30.0
     blocked_hours: List[int] = Field(default_factory=lambda: [18, 19, 20, 21])
     min_risk_reward_ratio: float = 2.0

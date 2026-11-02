@@ -102,6 +102,7 @@ def test_max_risk_per_trade_pct_architecture():
     )
     
     trade_manager.risk_settings.lot_sizing_mode = "DYNAMIC_RISK"
+    trade_manager.risk_settings.max_allowed_lot = 1.0  # cap above the 0.05-0.20 lots this test expects
     trade_manager.risk_settings.min_risk_reward_ratio = 2.0
     
     # 0.5% risk on $10,000 equity = $50 USD. $10 SL distance = 0.05 lots (100 points * $1 = $100 per 1.0 lot)

@@ -212,7 +212,12 @@ async function setTimeframe(tf) {
     addAuditEntry(`[TIMEFRAME] Synchronized chart timeframe to ${target} (${TIMEFRAMES[target].title}) — ${candles.length} candles rendered`, "var(--accent-cyan)");
   }
 
-  // 6. Automatically synchronize active entry timeframe in Risk Settings & Trading Worker
+  // 6. Sync the bot's entry timeframe with the chart, except in Donchian Trend
+  //    mode where entries always use H1 (the chart is only for viewing).
+  if (state.riskSettings && state.riskSettings.strategy_profile === "DONCHIAN_TREND") {
+    if (el("auto-trade-live-tf-badge")) el("auto-trade-live-tf-badge").textContent = `RUNNING (${state.riskSettings.donchian_timeframe || "H1"})`;
+    return;
+  }
   if (state.riskSettings) {
     state.riskSettings.entry_timeframe = target;
   }
@@ -224,6 +229,17 @@ async function setTimeframe(tf) {
     ...(state.riskSettings || {}),
     entry_timeframe: target
   });
+}
+
+// Clears manual SL/TP inputs (global: also used by the timeframe switcher).
+function resetSLTPInputs() {
+  for (const id of ["manual-sl-price", "manual-tp-price"]) {
+    const f = el(id);
+    if (f) {
+      f.value = "";
+      f.dataset.autoPopulated = "true";
+    }
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -269,6 +285,23 @@ function connectWebSocket() {
   };
 }
 
+// Merge incoming candles into the chart instead of replacing the list.
+// Sources send different counts (WebSocket 50, sync 80, timeframe switch 100) and
+// replacing made the visible candle count, and so the candle width, jump every few
+// seconds. Lists for a different timeframe than the chart are ignored.
+function mergeChartCandles(incoming) {
+  if (!incoming || !incoming.length) return false;
+  const tf = (state.timeframe || "").toUpperCase();
+  const inTf = (incoming[incoming.length - 1].timeframe || "").toUpperCase();
+  if (tf && inTf && inTf !== tf && !(tf === "1M" && inTf.startsWith("MN"))) return false;
+  const byTs = new Map((state.candles || []).map(c => [c.timestamp, c]));
+  incoming.forEach(c => byTs.set(c.timestamp, c));
+  state.candles = [...byTs.values()]
+    .sort((a, b) => (a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0))
+    .slice(-300);
+  return true;
+}
+
 function handleWSPayload(data) {
   if (data.sequence !== undefined) {
     if (data.sequence <= state.lastSequenceNumber) {
@@ -289,8 +322,7 @@ function handleWSPayload(data) {
   updateBotStatusUI(data.bot_status, data.engine_state, data.engine_reason, liveReason);
   if (data.ticker) updateTicker(data.ticker);
   if (data.account) updateAccount(data.account);
-  if (data.candles && data.candles.length > 0) {
-    state.candles = data.candles;
+  if (data.candles && data.candles.length > 0 && mergeChartCandles(data.candles)) {
     renderFinancialChart();
   }
   if (data.positions !== undefined) {
@@ -470,7 +502,8 @@ function updateDecisionReport(report) {
     }
   }
 
-  if (report.breakdown) {
+  // Legacy score boxes only exist when the old layout is present.
+  if (report.breakdown && el("pil-trend")) {
     const bd = report.breakdown;
     
     // Choose active direction to display in the 5-pillar matrix
@@ -547,53 +580,48 @@ function updateRiskSettingsUI(cfg, forceModalUpdate = true) {
 
   const modalVisible = el("modal-settings") && !el("modal-settings").classList.contains("hidden");
   if (el("cfg-max-risk") && (forceModalUpdate || !modalVisible)) {
-    if (el("cfg-trading-mode")) el("cfg-trading-mode").value = cfg.trading_mode_profile ?? "BALANCED";
-    if (el("cfg-strategy-profile")) el("cfg-strategy-profile").value = cfg.strategy_profile ?? "HYBRID_AUTO";
-    if (el("cfg-signal-mode")) el("cfg-signal-mode").value = cfg.signal_mode ?? "CLOSED_CANDLE";
-    if (el("cfg-entry-confirmation-mode")) el("cfg-entry-confirmation-mode").value = cfg.entry_confirmation_mode ?? "IMMEDIATE";
-    if (el("cfg-bb-period")) el("cfg-bb-period").value = cfg.bb_period ?? 20;
-    if (el("cfg-bb-std")) el("cfg-bb-std").value = cfg.bb_std ?? 2.0;
-    if (el("cfg-lot-mode")) el("cfg-lot-mode").value = cfg.lot_sizing_mode ?? "DYNAMIC_RISK";
-    if (el("cfg-user-lot")) el("cfg-user-lot").value = cfg.user_configured_lot ?? 0.01;
-    if (el("cfg-max-allowed-lot")) el("cfg-max-allowed-lot").value = cfg.max_allowed_lot ?? 1.00;
-    el("cfg-max-risk").value = cfg.max_risk_per_trade_pct ?? 1.0;
-    if (el("cfg-min-rr")) el("cfg-min-rr").value = String(cfg.min_risk_reward_ratio ?? 2.0);
-    el("cfg-daily-loss").value = cfg.daily_loss_limit_pct ?? 3.0;
-    if (el("cfg-weekly-loss")) el("cfg-weekly-loss").value = cfg.weekly_loss_limit_pct ?? 7.0;
-    if (el("cfg-max-daily-loss-amt")) el("cfg-max-daily-loss-amt").value = cfg.max_daily_loss_amount ?? 500;
-    el("cfg-max-positions").value = cfg.max_open_positions ?? 5;
-    el("cfg-default-lot").value = cfg.default_lot_size ?? 0.01;
-    if (el("cfg-auto-breakeven")) el("cfg-auto-breakeven").value = String(cfg.auto_breakeven_enabled !== false);
-    if (el("cfg-break-even-rr")) el("cfg-break-even-rr").value = cfg.break_even_rr ?? 1.0;
-    if (el("cfg-auto-trailing")) el("cfg-auto-trailing").value = String(cfg.auto_trailing_stop_enabled !== false);
-    if (el("cfg-giveback-guard")) el("cfg-giveback-guard").value = String(cfg.giveback_guard_enabled === true);
-    if (el("cfg-htf-filter")) {
-      el("cfg-htf-filter").value = (cfg.htf_alignment_filter_enabled === false) ? "DISABLED" : (cfg.htf_alignment_mode ?? "STRICT");
-    }
-    if (el("cfg-session-filter")) {
-      el("cfg-session-filter").value = (cfg.allowed_sessions && cfg.allowed_sessions.includes("ASIAN")) ? "ALL" : "LONDON_NY";
-    }
-    if (el("cfg-toxic-setups")) {
-      el("cfg-toxic-setups").value = (cfg.disabled_setups && cfg.disabled_setups.length > 0) ? "BLOCKED" : "ALLOWED";
-    }
-    el("cfg-trailing-pips").value = cfg.trailing_stop_pips ?? 15;
-    if (el("cfg-trailing-activation-rr")) el("cfg-trailing-activation-rr").value = cfg.trailing_activation_rr ?? 1.2;
-    if (el("cfg-trailing-atr-mult")) el("cfg-trailing-atr-mult").value = cfg.trailing_atr_multiplier ?? 2.0;
-    el("cfg-min-confidence").value = cfg.min_ai_confidence ?? 0.70;
-    if (el("cfg-auto-trade-enabled")) el("cfg-auto-trade-enabled").value = String(cfg.auto_trade_enabled);
-    if (el("cfg-auto-cooldown")) el("cfg-auto-cooldown").value = cfg.auto_trade_cooldown_seconds ?? 300;
-    if (el("cfg-max-daily-trades")) el("cfg-max-daily-trades").value = cfg.max_trades_per_day ?? 10;
-    if (el("cfg-max-consecutive-losses")) el("cfg-max-consecutive-losses").value = cfg.max_consecutive_losses ?? 5;
-    if (el("cfg-max-spread")) el("cfg-max-spread").value = cfg.max_spread_pips ?? 2.5;
-    if (el("cfg-enable-live-trading")) el("cfg-enable-live-trading").value = String(cfg.enable_live_trading ?? false);
+    const setVal = (id, v) => { if (el(id)) el(id).value = v; };
+    setVal("cfg-strategy-profile", cfg.strategy_profile === "DONCHIAN_TREND" ? "DONCHIAN_TREND" : "HYBRID_AUTO");
+    setVal("cfg-donchian-tf", (cfg.donchian_timeframe || "H1").toUpperCase() === "M15" ? "M15" : "H1");
+    setVal("cfg-news-filter", String(cfg.news_filter_enabled !== false));
+    setVal("cfg-lot-mode", cfg.lot_sizing_mode ?? "DYNAMIC_RISK");
+    setVal("cfg-max-risk", cfg.max_risk_per_trade_pct ?? 1.0);
+    setVal("cfg-user-lot", cfg.user_configured_lot ?? 0.01);
+    setVal("cfg-max-allowed-lot", cfg.max_allowed_lot ?? 0.05);
+    setVal("cfg-daily-loss", cfg.daily_loss_limit_pct ?? 3.0);
+    setVal("cfg-max-daily-loss-amt", cfg.max_daily_loss_amount ?? 0);
+    setVal("cfg-weekly-loss", cfg.weekly_loss_limit_pct ?? 7.0);
+    setVal("cfg-max-consecutive-losses", cfg.max_consecutive_losses ?? 0);
+    setVal("cfg-max-positions", cfg.max_open_positions ?? 2);
+    setVal("cfg-max-per-direction", cfg.max_positions_per_direction ?? 1);
+    setVal("cfg-min-entry-gap", cfg.min_minutes_between_entries ?? 30);
+    setVal("cfg-max-daily-trades", cfg.max_trades_per_day ?? 8);
+    setVal("cfg-max-spread", cfg.max_spread_pips ?? 3.0);
+    setVal("cfg-blocked-hours", (cfg.blocked_hours || []).join(","));
+    setVal("cfg-auto-trade-enabled", String(cfg.auto_trade_enabled === true));
+    setVal("cfg-enable-live-trading", String(cfg.enable_live_trading === true));
   }
 
   // Update Live Risk Monitor Sidebar Card Badges
-  if (el("risk-mode-badge")) el("risk-mode-badge").textContent = (cfg.trading_mode_profile ?? "BALANCED").toUpperCase();
-  if (el("risk-entry-confirm-badge")) {
-    const isImm = (cfg.entry_confirmation_mode ?? "IMMEDIATE") === "IMMEDIATE";
-    el("risk-entry-confirm-badge").textContent = isImm ? "IMMEDIATE" : "NEXT CANDLE";
-    el("risk-entry-confirm-badge").className = isImm ? "text-emerald" : "text-cyan";
+  if (el("risk-strategy-badge")) {
+    const isDon = cfg.strategy_profile === "DONCHIAN_TREND";
+    el("risk-strategy-badge").textContent = isDon ? `DONCHIAN TREND (${cfg.donchian_timeframe || "H1"})` : "LEGACY MULTI-SETUP";
+    el("risk-strategy-badge").className = isDon ? "text-emerald" : "text-amber";
+  }
+  if (el("risk-consec-badge")) {
+    const n = cfg.max_consecutive_losses ?? 0;
+    el("risk-consec-badge").textContent = n > 0 ? `After ${n} losses (24h)` : "Off";
+    el("risk-consec-badge").className = n > 0 ? "text-amber" : "text-muted";
+  }
+  if (el("risk-stacking-badge")) {
+    const per = cfg.max_positions_per_direction ?? 0;
+    const gap = cfg.min_minutes_between_entries ?? 0;
+    el("risk-stacking-badge").textContent = per > 0 ? `${per} per direction, ${gap} min gap` : `Off, ${gap} min gap`;
+    el("risk-stacking-badge").className = per > 0 ? "text-emerald" : "text-amber";
+  }
+  if (el("risk-hours-badge")) {
+    const hrs = cfg.blocked_hours || [];
+    el("risk-hours-badge").textContent = hrs.length ? hrs.map(h => String(h).padStart(2, "0") + ":00").join(", ") : "None";
   }
   if (el("risk-lot-mode-badge")) el("risk-lot-mode-badge").textContent = (cfg.lot_sizing_mode ?? "FIXED").toUpperCase();
   if (el("risk-target-vol-badge")) {
@@ -603,36 +631,11 @@ function updateRiskSettingsUI(cfg, forceModalUpdate = true) {
   }
   if (el("risk-max-lot-badge")) el("risk-max-lot-badge").textContent = `${fmt(cfg.max_allowed_lot ?? 1.00, 2)} Lots`;
   if (el("risk-pct-badge")) el("risk-pct-badge").textContent = `${cfg.max_risk_per_trade_pct ?? 1.0}% Equity`;
-  if (el("risk-rr-badge")) el("risk-rr-badge").textContent = `1 : ${cfg.min_risk_reward_ratio ?? 2.0}`;
-  if (el("risk-daily-limit-badge")) el("risk-daily-limit-badge").textContent = `${cfg.daily_loss_limit_pct ?? 3.0}% ($${cfg.max_daily_loss_amount ?? 500})`;
+  if (el("risk-daily-limit-badge")) {
+    const amt = cfg.max_daily_loss_amount ?? 0;
+    el("risk-daily-limit-badge").textContent = `${cfg.daily_loss_limit_pct ?? 3.0}%` + (amt > 0 ? ` / $${amt}` : "");
+  }
   if (el("risk-weekly-limit-badge")) el("risk-weekly-limit-badge").textContent = `${cfg.weekly_loss_limit_pct ?? 7.0}% Balance`;
-  if (el("risk-be-badge")) {
-    const beActive = cfg.auto_breakeven_enabled !== false;
-    const beVal = cfg.break_even_rr ?? 1.0;
-    el("risk-be-badge").textContent = beActive ? `Active @ ${beVal}R` : "Disabled";
-    el("risk-be-badge").className = beActive ? "text-emerald" : "text-muted";
-  }
-  if (el("risk-trailing-badge")) {
-    const trActive = cfg.auto_trailing_stop_enabled !== false;
-    el("risk-trailing-badge").textContent = trActive ? `Active (${cfg.trailing_stop_pips ?? 15} pips)` : "Disabled";
-    el("risk-trailing-badge").className = trActive ? "text-emerald" : "text-muted";
-  }
-  if (el("risk-htf-badge")) {
-    const htfDisabled = cfg.htf_alignment_filter_enabled === false;
-    const mode = cfg.htf_alignment_mode ?? "STRICT";
-    el("risk-htf-badge").textContent = htfDisabled ? "DISABLED" : `${mode} (1H/4H)`;
-    el("risk-htf-badge").className = htfDisabled ? "text-amber" : "text-emerald";
-  }
-  if (el("risk-session-badge")) {
-    const hasAsian = cfg.allowed_sessions && cfg.allowed_sessions.includes("ASIAN");
-    el("risk-session-badge").textContent = hasAsian ? "ALL SESSIONS" : "LONDON & NY";
-    el("risk-session-badge").className = hasAsian ? "text-amber" : "text-cyan";
-  }
-  if (el("risk-toxic-badge")) {
-    const hasBlocked = cfg.disabled_setups && cfg.disabled_setups.length > 0;
-    el("risk-toxic-badge").textContent = hasBlocked ? "ELIMINATED" : "ACTIVE";
-    el("risk-toxic-badge").className = hasBlocked ? "text-emerald" : "text-amber";
-  }
   if (el("risk-live-trading-badge")) {
     const liveActive = cfg.enable_live_trading === true;
     el("risk-live-trading-badge").textContent = liveActive ? "LIVE ENABLED" : "DEMO ONLY";
@@ -660,10 +663,14 @@ function renderPositionsTable() {
     const pnlColor = p.pnl_usd >= 0 ? "var(--accent-emerald)" : "var(--accent-red)";
     const sideColor = p.side === "BUY" ? "var(--accent-emerald)" : "var(--accent-red)";
 
+    // Result if the SL is hit: negative = loss, positive = profit already locked by the stop.
     let slStr = fmt(p.sl_price, digits);
-    const lossAmt = Math.abs(p.potential_loss_usd || p.planned_loss_usd || 0);
-    if (p.sl_price > 0 && lossAmt > 0) {
-      slStr += ` <span style="font-size:0.75rem;color:var(--accent-red);font-weight:600;">(-$${fmt(lossAmt)})</span>`;
+    const slPnl = Number(p.potential_loss_usd || 0);
+    if (p.sl_price > 0 && slPnl !== 0) {
+      const locked = slPnl > 0;
+      slStr += ` <span style="font-size:0.75rem;color:var(${locked ? "--accent-emerald" : "--accent-red"});font-weight:600;"`
+        + ` title="${locked ? "Profit locked if the stop is hit" : "Loss if the stop is hit"}">`
+        + `(${locked ? "+" : "-"}$${fmt(Math.abs(slPnl))})</span>`;
     }
 
     let tpStr = fmt(p.tp_price, digits);
@@ -682,7 +689,8 @@ function renderPositionsTable() {
       <td>${tpStr}</td>
       <td style="color:${pnlColor};font-weight:700">${p.pnl_usd >= 0 ? "+" : ""}${fmt(p.pnl_usd)} ${curr}</td>
       <td style="color:${pnlColor}">${p.pnl_pips >= 0 ? "+" : ""}${fmt(p.pnl_pips, 1)}</td>
-      <td>
+      <td style="white-space:nowrap">
+        <button class="btn-action-sm btn-action-edit" onclick="openModifySLTP('${p.trade_id}')" title="Change stop loss / take profit">✎ SL/TP</button>
         <button class="btn-action-sm" onclick="closePosition('${p.trade_id}')">✕ Close</button>
       </td>
     </tr>`;
@@ -1472,6 +1480,204 @@ async function closePosition(tradeId) {
 }
 window.closePosition = closePosition;
 
+// ─────────────────────────────────────────────────────────────
+//  MODIFY SL / TP OF AN OPEN POSITION
+// ─────────────────────────────────────────────────────────────
+const sltpEdit = { pos: null, bid: 0, ask: 0, timer: null, saving: false };
+
+function sltpIsBuy() { return sltpEdit.pos && String(sltpEdit.pos.side).toUpperCase() === "BUY"; }
+
+// USD gained/lost per 1.0 price move for this position.
+function sltpValuePerUnit(p) {
+  const pairs = [[p.potential_loss_usd, p.sl_price], [p.potential_profit_usd, p.tp_price]];
+  for (const [usd, px] of pairs) {
+    const dist = Math.abs((px || 0) - p.entry_price);
+    if (px > 0 && dist > 0 && Math.abs(usd || 0) > 0) return Math.abs(usd) / dist;
+  }
+  const sym = String(p.symbol || "").toUpperCase();
+  const contract = sym.startsWith("XAU") ? 100 : sym.startsWith("XAG") ? 5000 : 100000;
+  return contract * (p.lots || 0);
+}
+
+// Signed USD result if price reaches `px` (positive = profit).
+function sltpResultAt(px) {
+  const p = sltpEdit.pos;
+  if (!p || !(px > 0)) return null;
+  const move = sltpIsBuy() ? px - p.entry_price : p.entry_price - px;
+  return move * sltpValuePerUnit(p);
+}
+
+function sltpShowResult(id, usd, label) {
+  const box = el(id);
+  if (usd === null) { box.textContent = ""; return; }
+  box.textContent = `${label}: ${usd >= 0 ? "+" : "-"}$${fmt(Math.abs(usd))}`;
+  box.style.color = usd >= 0 ? "var(--accent-emerald)" : "var(--accent-red)";
+}
+
+// Same rules as the backend; returns an error message or "".
+function sltpValidate(sl, tp) {
+  const digits = getDigits(sltpEdit.pos.symbol);
+  const { bid, ask } = sltpEdit;
+  if (!(sl > 0)) return "Stop Loss is required.";
+  if (tp < 0 || isNaN(tp)) return "Take Profit must be 0 or a positive price.";
+  if (!(bid > 0 && ask > 0)) return "";  // no live price yet: the server will check
+  if (sltpIsBuy()) {
+    if (sl >= bid) return `For a BUY, the stop loss must be below the current price (${fmt(bid, digits)}).`;
+    if (tp > 0 && tp <= ask) return `For a BUY, the take profit must be above the current price (${fmt(ask, digits)}).`;
+  } else {
+    if (sl <= ask) return `For a SELL, the stop loss must be above the current price (${fmt(ask, digits)}).`;
+    if (tp > 0 && tp >= bid) return `For a SELL, the take profit must be below the current price (${fmt(bid, digits)}).`;
+  }
+  return "";
+}
+
+function sltpRefreshPreview() {
+  const p = sltpEdit.pos;
+  if (!p) return;
+  const sl = parseFloat(el("msl-new-sl").value);
+  const tpRaw = el("msl-new-tp").value.trim();
+  const tp = tpRaw === "" ? 0 : parseFloat(tpRaw);
+
+  sltpShowResult("msl-sl-result", sl > 0 ? sltpResultAt(sl) : null, "If SL is hit");
+  sltpShowResult("msl-tp-result", tp > 0 ? sltpResultAt(tp) : null, "If TP is hit");
+  if (!(tp > 0)) { el("msl-tp-result").textContent = "No take profit: trailing stop decides the exit"; el("msl-tp-result").style.color = "var(--text-muted)"; }
+
+  const err = sltpValidate(sl, tp);
+  const errBox = el("msl-error");
+  errBox.textContent = err;
+  errBox.classList.toggle("hidden", !err);
+
+  // Warn when the change adds risk compared to the current stop.
+  const warn = el("msl-warning");
+  const widened = p.sl_price > 0 && sl > 0 && (sltpIsBuy() ? sl < p.sl_price : sl > p.sl_price);
+  if (!err && widened) {
+    const extra = Math.abs(sl - p.sl_price) * sltpValuePerUnit(p);
+    warn.textContent = `This moves the stop further away and adds about $${fmt(extra)} of risk. `
+      + "The bot's trailing stop may pull it back at the next candle close.";
+    warn.classList.remove("hidden");
+  } else {
+    warn.classList.add("hidden");
+  }
+
+  const unchanged = Math.abs(sl - (p.sl_price || 0)) < 1e-9 && Math.abs(tp - (p.tp_price || 0)) < 1e-9;
+  el("msl-btn-save").disabled = !!err || unchanged || sltpEdit.saving;
+}
+
+function sltpRenderHeader() {
+  const p = sltpEdit.pos;
+  const digits = getDigits(p.symbol);
+  const curr = state.account ? state.account.currency : "USD";
+  el("msl-ticket").textContent = `#${p.trade_id}`;
+  el("msl-side").innerHTML = `<span style="color:var(${sltpIsBuy() ? "--accent-emerald" : "--accent-red"})">${p.side}</span> ${p.symbol} · ${fmt(p.lots, 2)} lot`;
+  el("msl-entry").textContent = fmt(p.entry_price, digits);
+  el("msl-price").textContent = sltpEdit.bid > 0 ? `${fmt(sltpEdit.bid, digits)} / ${fmt(sltpEdit.ask, digits)}` : "loading...";
+  el("msl-pnl").innerHTML = `<span style="color:var(${p.pnl_usd >= 0 ? "--accent-emerald" : "--accent-red"})">${p.pnl_usd >= 0 ? "+" : ""}${fmt(p.pnl_usd)} ${curr}</span>`;
+  el("msl-cur-sl").textContent = p.sl_price > 0 ? fmt(p.sl_price, digits) : "none";
+  el("msl-cur-tp").textContent = p.tp_price > 0 ? fmt(p.tp_price, digits) : "none";
+}
+
+async function sltpPollPrice() {
+  const p = sltpEdit.pos;
+  if (!p) return;
+  const t = await apiFetch(`/api/v1/market/ticker?symbol=${encodeURIComponent(p.symbol)}`);
+  if (!sltpEdit.pos || sltpEdit.pos.trade_id !== p.trade_id) return;  // modal closed meanwhile
+  if (t && t.bid > 0 && t.ask > 0) { sltpEdit.bid = t.bid; sltpEdit.ask = t.ask; }
+  // Keep the live P&L and current SL (the trailing stop may move it) in step.
+  const fresh = state.positions.find(x => String(x.trade_id) === String(p.trade_id));
+  if (!fresh) {
+    closeModifySLTP();
+    showTradeAlert("rejected", "Position Closed", `Position ${p.trade_id} is no longer open.`);
+    return;
+  }
+  sltpEdit.pos = fresh;
+  sltpRenderHeader();
+  sltpRefreshPreview();
+}
+
+function sltpFillInputs() {
+  const p = sltpEdit.pos;
+  const digits = getDigits(p.symbol);
+  el("msl-new-sl").value = p.sl_price > 0 ? Number(p.sl_price).toFixed(digits) : "";
+  el("msl-new-tp").value = p.tp_price > 0 ? Number(p.tp_price).toFixed(digits) : "0";
+}
+
+function openModifySLTP(tradeId) {
+  const p = state.positions.find(x => String(x.trade_id) === String(tradeId));
+  if (!p) { showTradeAlert("rejected", "Not Found", `Position ${tradeId} is no longer open.`); return; }
+  sltpEdit.pos = p;
+  sltpEdit.bid = 0; sltpEdit.ask = 0; sltpEdit.saving = false;
+  const step = Math.pow(10, -getDigits(p.symbol));
+  el("msl-new-sl").step = step; el("msl-new-tp").step = step;
+  sltpFillInputs();
+  sltpRenderHeader();
+  sltpRefreshPreview();
+  el("modal-modify-sltp").classList.remove("hidden");
+  clearInterval(sltpEdit.timer);
+  sltpPollPrice();
+  sltpEdit.timer = setInterval(sltpPollPrice, 2000);
+}
+window.openModifySLTP = openModifySLTP;
+
+function closeModifySLTP() {
+  clearInterval(sltpEdit.timer);
+  sltpEdit.timer = null;
+  sltpEdit.pos = null;
+  el("modal-modify-sltp").classList.add("hidden");
+}
+
+async function saveModifySLTP(ev) {
+  ev.preventDefault();
+  const p = sltpEdit.pos;
+  if (!p || sltpEdit.saving) return;
+  const sl = parseFloat(el("msl-new-sl").value);
+  const tpRaw = el("msl-new-tp").value.trim();
+  const tp = tpRaw === "" ? 0 : parseFloat(tpRaw);
+  const err = sltpValidate(sl, tp);
+  if (err) { el("msl-error").textContent = err; el("msl-error").classList.remove("hidden"); return; }
+
+  sltpEdit.saving = true;
+  const btn = el("msl-btn-save");
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
+  addAuditEntry(`[TRADE] Modifying #${p.trade_id}: SL ${sl}, TP ${tp || "none"}...`, "var(--accent-amber)");
+
+  const res = await apiFetch(`/api/v1/trade/positions/modify?trade_id=${encodeURIComponent(p.trade_id)}&sl=${sl}&tp=${tp}`, "POST");
+
+  sltpEdit.saving = false;
+  btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Save SL / TP';
+  if (res && res.positions) { state.positions = res.positions; renderPositionsTable(); }
+
+  if (res && res.success) {
+    addAuditEntry(`[TRADE] ${res.message}`, "var(--accent-emerald)");
+    showTradeAlert("success", "SL / TP Updated", res.message);
+    closeModifySLTP();
+    await refreshAccountData();
+  } else {
+    const msg = res ? res.message : "Could not reach the server.";
+    addAuditEntry(`[TRADE] Modify failed: ${msg}`, "var(--accent-red)");
+    sltpRefreshPreview();  // re-enables Save; then show the server's reason
+    el("msl-error").textContent = msg;
+    el("msl-error").classList.remove("hidden");
+  }
+}
+
+function initModifySLTP() {
+  if (!el("modal-modify-sltp")) return;
+  el("btn-close-modify-sltp").addEventListener("click", closeModifySLTP);
+  el("msl-btn-cancel").addEventListener("click", closeModifySLTP);
+  el("modal-modify-sltp").addEventListener("click", e => { if (e.target.id === "modal-modify-sltp") closeModifySLTP(); });
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && sltpEdit.pos) closeModifySLTP(); });
+  el("form-modify-sltp").addEventListener("submit", saveModifySLTP);
+  el("msl-new-sl").addEventListener("input", sltpRefreshPreview);
+  el("msl-new-tp").addEventListener("input", sltpRefreshPreview);
+  el("msl-btn-breakeven").addEventListener("click", () => {
+    el("msl-new-sl").value = Number(sltpEdit.pos.entry_price).toFixed(getDigits(sltpEdit.pos.symbol));
+    sltpRefreshPreview();
+  });
+  el("msl-btn-no-tp").addEventListener("click", () => { el("msl-new-tp").value = "0"; sltpRefreshPreview(); });
+  el("msl-btn-reset").addEventListener("click", () => { sltpFillInputs(); sltpRefreshPreview(); });
+}
+
 async function cancelPendingOrder(orderId) {
   addAuditEntry(`[PENDING] Cancelling order ${orderId}...`, "var(--accent-amber)");
   const res = await apiFetch(`/api/v1/trade/pending/cancel?order_id=${orderId}`, "POST");
@@ -1571,42 +1777,6 @@ async function sendBotCommand(cmd) {
 //  RISK SETTINGS CONTEXTUAL HELP TOOLTIP ENGINE
 // ─────────────────────────────────────────────────────────────
 const RISK_HELP_DICTIONARY = {
-  "cfg-trading-mode": {
-    title: "AI Trading Strategy Profile",
-    summary: "Sets the global risk tolerance profile and minimum required confidence threshold for AI signal validation.",
-    increase: "<strong>AGGRESSIVE:</strong> Lowers confidence threshold (65%+) & min R:R (1:1.5+), generating more trades with higher risk exposure.",
-    decrease: "<strong>CONSERVATIVE:</strong> Raises confidence threshold (78%+) & min R:R (1:2.5+), filtering out lower quality trades conservatively.",
-    execution: "Filters out low-confidence AI signals before order submission.",
-    limit: "Blocks execution if a signal's confidence or setup R:R is below the profile threshold.",
-    example: "In CONSERVATIVE mode, a setup with 74% AI confidence is rejected even if market momentum is strong."
-  },
-  "cfg-strategy-profile": {
-    title: "Gold Engine Execution Strategy",
-    summary: "Determines the core algorithmic strategy rules for entry signal generation (Bollinger Bands, Order Blocks, or Hybrid).",
-    increase: "<strong>HYBRID / ALL:</strong> Combines multiple indicator filters requiring confluence across mean reversion and institutional order blocks.",
-    decrease: "<strong>SINGLE STRATEGY:</strong> Focuses strictly on one technical setup (e.g. Band Reversion), increasing signal frequency.",
-    execution: "Governs technical rule matching for BUY and SELL signal triggers.",
-    limit: "Non-conforming setups or incompatible market regimes prevent signal generation.",
-    example: "In BB_BREAKOUT mode, trades will only trigger when price expands aggressively outside Bollinger Bands after a squeeze."
-  },
-  "cfg-signal-mode": {
-    title: "Signal Evaluation Mode",
-    summary: "Controls whether market signals are evaluated on CLOSED candles (confirmed bars) or CURRENT forming candles.",
-    increase: "<strong>CURRENT CANDLE:</strong> Evaluates incoming ticks in real-time for faster entry speed, but carries false breakout risk.",
-    decrease: "<strong>CLOSED CANDLE:</strong> Waits for bar close confirmation to eliminate repainting and false signals.",
-    execution: "Determines signal evaluation timing and bar confirmation requirements.",
-    limit: "Unconfirmed candle signals are ignored until the bar closes in CLOSED_CANDLE mode.",
-    example: "In CLOSED_CANDLE mode, an RSI overbought alert mid-candle will wait until the 15-minute bar closes before opening a trade."
-  },
-  "cfg-entry-confirmation-mode": {
-    title: "Entry Confirmation Mechanism",
-    summary: "Configures whether signals execute immediately or wait for the NEXT candle close confirmation to prevent immediate-reversal losses.",
-    increase: "<strong>CONFIRM NEXT CANDLE:</strong> Waits 1 candle delay (~1m M1, ~5m M5, ~15m M15) and requires next candle close to hold direction.",
-    decrease: "<strong>IMMEDIATE:</strong> Default mode — executes trade immediately when signal fires.",
-    execution: "Re-validates setup parameters at CURRENT market price upon confirmation candle close before order placement.",
-    limit: "If next candle reverses against signal direction, or if spread widens/news blackout occurs, trade is cancelled.",
-    example: "With CONFIRM_NEXT_CANDLE on M5, a BUY signal waits 5 minutes; if the next candle closes bullish, order parameters are re-calculated at current price and executed."
-  },
   "cfg-lot-mode": {
     title: "Position Sizing Mode",
     summary: "Controls how trade volume (lots) is calculated—either static user-defined FIXED lots or DYNAMIC RISK based on Stop Loss distance.",
@@ -1615,24 +1785,6 @@ const RISK_HELP_DICTIONARY = {
     execution: "Determines exact lot size submitted to MetaTrader 5.",
     limit: "Calculated lot size is capped at Maximum Allowed Lot Cap if it exceeds the limit.",
     example: "With $10,000 equity, 1% risk ($100), and a 50-pip SL, DYNAMIC RISK automatically calculates 0.20 lots."
-  },
-  "cfg-bb-period": {
-    title: "Dark Venus BB Period",
-    summary: "Sets the lookback period (number of candles) used to calculate the Bollinger Bands moving average baseline.",
-    increase: "<strong>HIGHER PERIOD (e.g. 30):</strong> Smooths baseline, widening volatility channels and producing fewer, higher-conviction signals.",
-    decrease: "<strong>LOWER PERIOD (e.g. 10):</strong> Reacts rapidly to recent price changes, narrowing channels and producing more frequent signals.",
-    execution: "Adjusts upper/lower band boundary levels used for mean reversion or breakout detection.",
-    limit: "N/A (Technical indicator parameter).",
-    example: "A period of 20 uses the 20-candle Simple Moving Average as the center line for volatility bands."
-  },
-  "cfg-bb-std": {
-    title: "Dark Venus BB Standard Deviation",
-    summary: "Sets the multiplier for standard deviation width around the Bollinger Bands baseline.",
-    increase: "<strong>HIGHER MULTIPLIER (e.g. 2.5):</strong> Expands band width, requiring extreme price deviation before triggering entries.",
-    decrease: "<strong>LOWER MULTIPLIER (e.g. 1.5):</strong> Narrows band width, triggering entries closer to the moving average.",
-    execution: "Controls overbought and oversold entry threshold distances.",
-    limit: "Price must touch or breach outer bands to trigger mean-reversion setups.",
-    example: "A setting of 2.0 standard deviations encompasses ~95% of price movement envelope."
   },
   "cfg-user-lot": {
     title: "Fixed Lot Size (Lots)",
@@ -1660,15 +1812,6 @@ const RISK_HELP_DICTIONARY = {
     execution: "Used in DYNAMIC RISK mode to compute lot size based on Stop Loss distance.",
     limit: "Blocks trade execution if FIXED lot risks more than this percentage or if SL distance makes min lot size exceed this limit.",
     example: "On a $10,000 account, a 1.0% setting limits your maximum loss to $100 if Stop Loss is hit."
-  },
-  "cfg-min-rr": {
-    title: "Min Risk/Reward Ratio",
-    summary: "Defines the minimum potential reward required compared with the amount being risked on a trade (e.g. 1:2.0).",
-    increase: "<strong>HIGHER RATIO (e.g. 1:3.0):</strong> Demands larger profit targets relative to risk, increasing payout per win but reducing win rate.",
-    decrease: "<strong>LOWER RATIO (e.g. 1:1.5):</strong> Allows closer profit targets, improving win rate but requiring higher accuracy.",
-    execution: "Evaluates trade setup reward potential before submitting orders.",
-    limit: "Blocks trade execution if the setup's Take Profit is too close relative to Stop Loss.",
-    example: "With a 20-pip Stop Loss, a 1:2.0 ratio requires Take Profit to be at least 40 pips away from entry."
   },
   "cfg-daily-loss": {
     title: "Daily Loss Circuit Breaker (%)",
@@ -1706,69 +1849,6 @@ const RISK_HELP_DICTIONARY = {
     limit: "Blocks new trade entries when active open positions equal or exceed this number.",
     example: "If maximum open trades is 5 and 5 trades are active, any new trade signal is safely rejected."
   },
-  "cfg-default-lot": {
-    title: "Default / Fallback Lot Size",
-    summary: "Serves as the safety fallback order volume if dynamic risk calculations encounter missing market parameters.",
-    increase: "<strong>HIGHER FALLBACK:</strong> Increases order volume when fallback is triggered.",
-    decrease: "<strong>LOWER FALLBACK:</strong> Ensures minimum conservative exposure during calculation anomalies.",
-    execution: "Used as backup volume when Stop Loss distance or equity data is temporarily unavailable.",
-    limit: "Subject to Maximum Allowed Lot Cap and free margin checks.",
-    example: "If Stop Loss distance cannot be calculated due to tick feed delay, order volume defaults to 0.10 lots."
-  },
-  "cfg-auto-breakeven": {
-    title: "Auto-Breakeven Protection",
-    summary: "Toggles automatic adjustment of Stop Loss to entry price (break-even) once trade reaches a specified profit milestone (e.g. 1.0R).",
-    increase: "<strong>ENABLED:</strong> Automatically locks in risk-free status on profitable trades.",
-    decrease: "<strong>DISABLED:</strong> Leaves Stop Loss at initial placement until hit or closed.",
-    execution: "Sends position modification requests to MT5 when profit target is hit.",
-    limit: "N/A (Position management feature).",
-    example: "When a trade reaches +20 pips profit (1.0x risk), SL is moved to entry price (+0 pips), eliminating downside risk."
-  },
-  "cfg-auto-trailing": {
-    title: "Auto-Trailing Stop",
-    summary: "Toggles dynamic trailing Stop Loss that follows market price in favorable direction to lock in profits as market advances.",
-    increase: "<strong>ENABLED:</strong> Continuously adjusts Stop Loss behind winning trades.",
-    decrease: "<strong>DISABLED:</strong> Keeps Stop Loss static at break-even or initial entry level.",
-    execution: "Sends live position update requests to MT5 as favorable price movement occurs.",
-    limit: "N/A (Position management feature).",
-    example: "As Gold moves up 30 pips in your favor, trailing stop follows 15 pips behind price to lock in accrued profit."
-  },
-  "cfg-trailing-pips": {
-    title: "Trailing Stop Distance (Pips)",
-    summary: "Sets the fixed pip buffer distance maintained between peak market price and trailing Stop Loss.",
-    increase: "<strong>LARGER DISTANCE (e.g. 30 pips):</strong> Gives trades more breathing room against normal noise, preventing premature exits.",
-    decrease: "<strong>SMALLER DISTANCE (e.g. 10 pips):</strong> Locks in profit aggressively but risks exiting on minor pullbacks.",
-    execution: "Defines trailing gap for position modifications.",
-    limit: "Exits position if price retraces by this pip distance from peak profit.",
-    example: "With a 15-pip trailing distance, if EURUSD reaches 1.0860, SL is locked at 1.0845."
-  },
-  "cfg-min-confidence": {
-    title: "Min AI Confidence Score",
-    summary: "Defines the minimum AI model probability score (0.50 to 0.95) required before approving trade execution.",
-    increase: "<strong>HIGHER THRESHOLD (e.g. 0.80):</strong> Filters out lower-confidence setups, taking fewer but higher probability trades.",
-    decrease: "<strong>LOWER THRESHOLD (e.g. 0.60):</strong> Takes more signals with lower probability requirements.",
-    execution: "Acts as a primary gatekeeper in the AI signal engine.",
-    limit: "Blocks trade execution if the AI model confidence score is below the required threshold.",
-    example: "With a 0.70 (70%) setting, a setup with 68% AI confidence is blocked and logged in the audit trail."
-  },
-  "cfg-trailing-activation-rr": {
-    title: "Trailing Activation (R:R Ratio)",
-    summary: "Sets the unrealized profit milestone (in R-multiples) required before the trailing stop mechanism activates.",
-    increase: "<strong>HIGHER MULTIPLE (e.g. 2.0R):</strong> Delays trailing activation, allowing trades to develop toward initial Take Profit.",
-    decrease: "<strong>LOWER MULTIPLE (e.g. 1.0R):</strong> Starts trailing earlier to lock in early gains.",
-    execution: "Delays trailing stop modifications until unrealized profit hits threshold.",
-    limit: "Trailing remains inactive until unrealized P&L reaches this R-multiple.",
-    example: "With a 1.2R threshold on a 20-pip SL trade, trailing begins only after trade gains +24 pips."
-  },
-  "cfg-trailing-atr-mult": {
-    title: "Dynamic ATR Trailing Multiplier",
-    summary: "Sets the volatility multiplier for dynamic ATR-based trailing stop buffer calculations.",
-    increase: "<strong>HIGHER MULTIPLIER (e.g. 3.0x ATR):</strong> Expands trailing cushion during high volatility to avoid whipsaws.",
-    decrease: "<strong>LOWER MULTIPLIER (e.g. 1.5x ATR):</strong> Tightens trailing cushion for faster exit on reversal.",
-    execution: "Multiplies M1 ATR value to calculate dynamic trailing pip distance.",
-    limit: "N/A (Dynamic trailing calculation).",
-    example: "If M1 ATR is 5 pips and multiplier is 2.0x, dynamic trailing stop cushion will be 10 pips."
-  },
   "cfg-auto-trade-enabled": {
     title: "Automated Trading Engine",
     summary: "Master switch enabling or disabling fully autonomous order execution on MetaTrader 5.",
@@ -1778,15 +1858,6 @@ const RISK_HELP_DICTIONARY = {
     limit: "Stops all automated trade placement when set to DISABLED.",
     example: "When DISABLED, AI signals display on dashboard and audit log, but no live orders are placed automatically."
   },
-  "cfg-auto-cooldown": {
-    title: "Auto-Trade Cooldown (Seconds)",
-    summary: "Defines the mandatory wait time in seconds required between consecutive automated trades.",
-    increase: "<strong>LONGER COOLDOWN (e.g. 600s / 10m):</strong> Prevents over-trading and rapid re-entry during volatile spikes.",
-    decrease: "<strong>SHORTER COOLDOWN (e.g. 60s):</strong> Allows rapid sequential trade entries.",
-    execution: "Enforces wait timer after every executed automated trade.",
-    limit: "Blocks automated trades until the cooldown timer expires.",
-    example: "With a 300-second cooldown (5 minutes), after trade #1 opens at 10:00, no automated trade can open until 10:05."
-  },
   "cfg-max-spread": {
     title: "Max Allowed Spread (Pips)",
     summary: "Sets the maximum broker bid/ask spread allowed in pips for trade execution.",
@@ -1795,15 +1866,6 @@ const RISK_HELP_DICTIONARY = {
     execution: "Checks real-time broker spread before placing orders.",
     limit: "Blocks trade execution if live broker spread exceeds this threshold.",
     example: "If maximum spread is 2.5 pips and news spikes spread to 4.0 pips, trade execution is blocked."
-  },
-  "cfg-max-consecutive-losses": {
-    title: "Max Consecutive Loss Limit",
-    summary: "Sets the maximum allowed consecutive losing trades before the circuit breaker locks automated trading.",
-    increase: "<strong>HIGHER LIMIT:</strong> Allows longer drawdown sequences before locking trading.",
-    decrease: "<strong>LOWER LIMIT:</strong> Stops trading quickly on losing streaks to prevent revenge trading or strategy misalignment.",
-    execution: "Tracks consecutive closed losing trades.",
-    limit: "Locks automated trading engine when consecutive loss count hits this limit.",
-    example: "If set to 5 and 5 trades in a row hit Stop Loss, auto-trading halts until manually reviewed and reset."
   },
   "cfg-max-daily-trades": {
     title: "Max Automated Trades Per Day",
@@ -1822,6 +1884,51 @@ const RISK_HELP_DICTIONARY = {
     execution: "Performs strict safety verification before sending orders to live broker servers.",
     limit: "Completely blocks order placement if connected to a REAL account while set to FALSE.",
     example: "If connected to a live real account ($50,000) and lock is FALSE, order execution is blocked for safety."
+  },
+  "cfg-strategy-profile": {
+    title: "Trading Strategy",
+    summary: "Which rules create entry signals. DONCHIAN TREND is the backtested H1 strategy; LEGACY is the old multi-setup engine that lost money on demo.",
+    increase: "<strong>DONCHIAN TREND:</strong> ~60 trades/year, 34-40% win rate, profit comes from a few large trend moves.",
+    decrease: "<strong>LEGACY:</strong> many M15 trades from 15 unverified setups. Not recommended.",
+    execution: "Decides when a BUY or SELL signal is produced.",
+    limit: "All risk limits below still apply to every signal.",
+    example: "A close above the last 100 H1 highs opens a BUY with a 3xATR stop."
+  },
+  "cfg-max-consecutive-losses": {
+    title: "Pause After Consecutive Losses",
+    summary: "Pauses new entries after this many losing trades in a row. The pause ends automatically 24 hours after the last loss.",
+    increase: "<strong>Higher / 0:</strong> fewer pauses. 0 turns it off.",
+    decrease: "<strong>Lower:</strong> pauses sooner. Trend strategies often lose 5-15 in a row, so a low value can skip the winning trade.",
+    execution: "Checked before every new entry.",
+    limit: "Open trades are not closed by this setting.",
+    example: "With 3, after 3 losses the bot waits 24h before trading again."
+  },
+  "cfg-max-per-direction": {
+    title: "Max Positions Per Direction",
+    summary: "Maximum open trades in the same direction (BUY or SELL) on one symbol.",
+    increase: "<strong>Higher:</strong> allows adding trades in the same direction (stacking).",
+    decrease: "<strong>1:</strong> one BUY and/or one SELL at a time. Stacking caused most past losses.",
+    execution: "Checked before every new entry.",
+    limit: "0 turns this guard off.",
+    example: "With 1, a second BUY is blocked while a BUY is open."
+  },
+  "cfg-min-entry-gap": {
+    title: "Minimum Minutes Between Entries",
+    summary: "Minimum time since the last trade was opened before a new one is allowed. Read from the trade database, so it survives restarts.",
+    increase: "<strong>Higher:</strong> fewer, more spaced-out entries.",
+    decrease: "<strong>Lower / 0:</strong> entries can follow each other quickly.",
+    execution: "Checked before every new entry.",
+    limit: "0 turns this guard off.",
+    example: "With 30, a trade opened at 10:00 blocks new entries until 10:30."
+  },
+  "cfg-blocked-hours": {
+    title: "Blocked Hours",
+    summary: "Hours (PC clock, 0-23) when no new trades open. Leave empty to allow all hours.",
+    increase: "<strong>More hours:</strong> fewer trading hours.",
+    decrease: "<strong>Empty:</strong> trade at any hour (the backtest used all hours).",
+    execution: "Checked before every new entry.",
+    limit: "Open trades are still managed during blocked hours.",
+    example: "18,19 blocks new entries from 18:00 to 19:59."
   }
 };
 
@@ -2025,6 +2132,7 @@ function initControls() {
     if (riskCfg) updateRiskSettingsUI(riskCfg, true);
   });
   el("btn-close-settings").addEventListener("click", () => el("modal-settings").classList.add("hidden"));
+  initModifySLTP();
 
   const getFloat = (id, defVal) => {
     const elem = el(id);
@@ -2043,70 +2151,48 @@ function initControls() {
   el("form-risk-settings").addEventListener("submit", async (e) => {
     e.preventDefault();
     const prevCfg = state.riskSettings || {};
+    const pick = (id) => el(id) ? el(id).value : null;
 
-    // Parse HTF alignment filter
-    const htfVal = el("cfg-htf-filter") ? el("cfg-htf-filter").value : (prevCfg.htf_alignment_mode ?? "STRICT");
-    const htfEnabled = htfVal !== "DISABLED";
-    const htfMode = htfEnabled ? htfVal : "STRICT";
+    // Blocked hours: "18, 19,20" -> [18, 19, 20]; invalid entries are dropped.
+    const hoursRaw = (pick("cfg-blocked-hours") || "").split(",").map(x => x.trim()).filter(x => x !== "");
+    const blockedHours = [...new Set(hoursRaw.map(Number).filter(h => Number.isInteger(h) && h >= 0 && h <= 23))].sort((x, y) => x - y);
+    if (blockedHours.length !== hoursRaw.length) {
+      alert("Blocked Hours: use whole numbers 0-23 separated by commas (e.g. 18,19,20).");
+      return;
+    }
 
-    // Parse session filter
-    const sessVal = el("cfg-session-filter") ? el("cfg-session-filter").value : "LONDON_NY";
-    const allowedSessions = sessVal === "ALL" 
-      ? ["ASIAN", "LONDON", "NEWYORK", "LONDON_NY_OVERLAP"] 
-      : ["LONDON", "NEWYORK", "LONDON_NY_OVERLAP"];
+    const strategy = pick("cfg-strategy-profile") || prevCfg.strategy_profile || "DONCHIAN_TREND";
 
-    // Parse toxic setups filter
-    const toxicVal = el("cfg-toxic-setups") ? el("cfg-toxic-setups").value : "BLOCKED";
-    const defaultToxicSetups = [
-      "BB Midline Pullback",
-      "SETUP D: Bullish BOS Breakout & Retest",
-      "SETUP D: Bearish BOS Breakdown & Retest",
-      "SETUP F: Bullish Volume & Momentum Expansion",
-      "SETUP F: Bearish Volume & Momentum Expansion",
-      "BB Band Breakout / Momentum"
-    ];
-    const disabledSetups = toxicVal === "BLOCKED" ? defaultToxicSetups : [];
-
+    // Only the fields shown in the form are changed; everything else keeps its
+    // saved value (the old form overwrote disabled_setups and strategy on every save).
     const payload = {
       ...prevCfg,
-      trading_mode_profile: el("cfg-trading-mode") ? el("cfg-trading-mode").value : "BALANCED",
-      strategy_profile: el("cfg-strategy-profile") ? el("cfg-strategy-profile").value : "HYBRID_AUTO",
-      signal_mode: el("cfg-signal-mode") ? el("cfg-signal-mode").value : "CLOSED_CANDLE",
-      entry_timeframe: state.timeframe || (state.riskSettings ? state.riskSettings.entry_timeframe : "M15"),
-      entry_confirmation_mode: el("cfg-entry-confirmation-mode") ? el("cfg-entry-confirmation-mode").value : "IMMEDIATE",
-      bb_period: getInt("cfg-bb-period", 20),
-      bb_std: getFloat("cfg-bb-std", 2.0),
-      lot_sizing_mode: el("cfg-lot-mode") ? el("cfg-lot-mode").value : "FIXED",
-      user_configured_lot: getFloat("cfg-user-lot", 0.10),
-      max_allowed_lot: getFloat("cfg-max-allowed-lot", 1.00),
+      strategy_profile: strategy,
+      donchian_timeframe: pick("cfg-donchian-tf") || prevCfg.donchian_timeframe || "H1",
+      entry_timeframe: strategy === "DONCHIAN_TREND" ? (pick("cfg-donchian-tf") || "H1") : (prevCfg.entry_timeframe || "M15"),
+      lot_sizing_mode: pick("cfg-lot-mode") || "DYNAMIC_RISK",
       max_risk_per_trade_pct: getFloat("cfg-max-risk", 1.0),
-      min_risk_reward_ratio: getFloat("cfg-min-rr", 2.0),
+      user_configured_lot: getFloat("cfg-user-lot", 0.01),
+      max_allowed_lot: getFloat("cfg-max-allowed-lot", 0.05),
       daily_loss_limit_pct: getFloat("cfg-daily-loss", 3.0),
+      max_daily_loss_amount: getFloat("cfg-max-daily-loss-amt", 0),
       weekly_loss_limit_pct: getFloat("cfg-weekly-loss", 7.0),
-      max_daily_loss_amount: getFloat("cfg-max-daily-loss-amt", 500.0),
-      max_open_positions: getInt("cfg-max-positions", 5),
-      default_lot_size: getFloat("cfg-default-lot", 0.10),
-      auto_breakeven_enabled: el("cfg-auto-breakeven") ? (el("cfg-auto-breakeven").value === "true") : true,
-      break_even_rr: getFloat("cfg-break-even-rr", 1.0),
-      auto_trailing_stop_enabled: el("cfg-auto-trailing") ? (el("cfg-auto-trailing").value === "true") : true,
-      giveback_guard_enabled: el("cfg-giveback-guard") ? (el("cfg-giveback-guard").value === "true") : false,
-      giveback_guard_min_rr: prevCfg.giveback_guard_min_rr ?? 1.5,
-      giveback_guard_retrace_pct: prevCfg.giveback_guard_retrace_pct ?? 50.0,
-      trailing_stop_pips: getFloat("cfg-trailing-pips", 15.0),
-      trailing_activation_rr: getFloat("cfg-trailing-activation-rr", 1.2),
-      trailing_atr_multiplier: getFloat("cfg-trailing-atr-mult", 2.0),
-      min_ai_confidence: getFloat("cfg-min-confidence", 0.70),
-      auto_trade_enabled: el("cfg-auto-trade-enabled") ? (el("cfg-auto-trade-enabled").value === "true") : false,
-      auto_trade_cooldown_seconds: getInt("cfg-auto-cooldown", 300),
-      max_trades_per_day: getInt("cfg-max-daily-trades", 10),
-      max_consecutive_losses: getInt("cfg-max-consecutive-losses", 5),
-      max_spread_pips: getFloat("cfg-max-spread", 2.5),
-      enable_live_trading: el("cfg-enable-live-trading") ? (el("cfg-enable-live-trading").value === "true") : false,
-      htf_alignment_filter_enabled: htfEnabled,
-      htf_alignment_mode: htfMode,
-      allowed_sessions: allowedSessions,
-      disabled_setups: disabledSetups
+      max_consecutive_losses: getInt("cfg-max-consecutive-losses", 0),
+      max_open_positions: getInt("cfg-max-positions", 2),
+      max_positions_per_direction: getInt("cfg-max-per-direction", 1),
+      min_minutes_between_entries: getFloat("cfg-min-entry-gap", 30),
+      max_trades_per_day: getInt("cfg-max-daily-trades", 8),
+      max_spread_pips: getFloat("cfg-max-spread", 3.0),
+      blocked_hours: blockedHours,
+      news_filter_enabled: pick("cfg-news-filter") !== "false",
+      auto_trade_enabled: pick("cfg-auto-trade-enabled") === "true",
+      enable_live_trading: pick("cfg-enable-live-trading") === "true"
     };
+
+    if (payload.max_allowed_lot < payload.user_configured_lot) {
+      alert("Maximum Lot must be at least the Fixed Lot Size.");
+      return;
+    }
 
     if (payload.weekly_loss_limit_pct <= 0) {
       addAuditEntry("[SETTINGS ERROR] Weekly Loss Limit must be greater than 0%.", "var(--accent-red)");
@@ -2125,7 +2211,10 @@ function initControls() {
       addAuditEntry("[SETTINGS] Risk management settings saved successfully.", "var(--accent-emerald)");
       el("modal-settings").classList.add("hidden");
     } else {
-      addAuditEntry("[SETTINGS] Failed to save risk settings on backend. Check server log.", "var(--accent-red)");
+      const why = (res && res.message) ? res.message : "Failed to save risk settings on backend. Check server log.";
+      addAuditEntry(`[SETTINGS] ${why}`, "var(--accent-red)");
+      if (res && res.settings) updateRiskSettingsUI(res.settings, true);  // show what is really active
+      alert(why);
     }
   });
 
@@ -2211,19 +2300,6 @@ function initControls() {
         tpEl.dataset.autoPopulated = "false";
       }
     });
-  }
-
-  function resetSLTPInputs() {
-    const s = el("manual-sl-price");
-    const t = el("manual-tp-price");
-    if (s) {
-      s.value = "";
-      s.dataset.autoPopulated = "true";
-    }
-    if (t) {
-      t.value = "";
-      t.dataset.autoPopulated = "true";
-    }
   }
 
   // Symbol Selector
@@ -2851,8 +2927,7 @@ async function bootstrap() {
       if (ticker) updateTicker(ticker);
 
       const candles = await apiFetch(`/api/v1/market/candles?symbol=${state.symbol}&timeframe=${state.timeframe}&count=80`);
-      if (candles && candles.length > 0) {
-        state.candles = candles;
+      if (candles && candles.length > 0 && mergeChartCandles(candles)) {
         renderFinancialChart();
       }
 
@@ -2893,6 +2968,9 @@ async function bootstrap() {
   }, 4000);
 
   startAutoAnalysisScheduler();
+
+  refreshDonchianPanel();
+  setInterval(refreshDonchianPanel, 5000);
 
   const popupCloseBtn = el("popup-close-btn");
   if (popupCloseBtn) {
@@ -3090,6 +3168,115 @@ function updatePKTClockAndHighlight() {
     if (badgeEl) { badgeEl.textContent = "AVOID M1 SCALPING"; badgeEl.style.background = "#ef4444"; badgeEl.style.color = "#ffffff"; }
     if (bannerEl) bannerEl.style.borderColor = "#ef4444";
   }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  DONCHIAN TREND STRATEGY PANEL
+// ─────────────────────────────────────────────────────────────
+async function refreshDonchianPanel() {
+  if (!el("dt-panel")) return;
+  let d = null;
+  try {
+    const res = await fetch(API_BASE + `/api/v1/strategy/donchian/status?symbol=${encodeURIComponent(state.symbol || "XAUUSD")}`,
+      { headers: { "X-API-Key": API_KEY } });
+    if (res.ok) d = await res.json();
+  } catch (e) { /* backend offline: keep last values */ }
+  if (!d) return;
+  renderDonchianPanel(d);
+}
+
+function renderDonchianPanel(d) {
+  const cur = d.currency || "USD";
+  const money = (v) => (v === null || v === undefined) ? "--" : `${v < 0 ? "-" : ""}$${fmt(Math.abs(v), 2)}`;
+  const sig = el("dt-signal");
+  const chip = el("dt-strategy-chip");
+
+  if (chip) {
+    chip.textContent = d.active ? "DONCHIAN TREND · ACTIVE" : "NOT ACTIVE (Legacy selected)";
+    chip.className = "dt-chip" + (d.active ? "" : " dt-signal-off");
+  }
+  if (!d.ok) {
+    if (sig) { sig.textContent = "NO DATA"; sig.className = "dt-signal dt-signal-off"; }
+    if (el("dt-signal-text")) el("dt-signal-text").textContent = d.message || "Waiting for MT5 data...";
+    return;
+  }
+
+  const trendEl = el("dt-trend");
+  if (trendEl) {
+    const t = d.daily_trend || "UNKNOWN";
+    const allowed = t === "UP" ? "only BUY breakouts are taken" : t === "DOWN" ? "only SELL breakouts are taken" : "no trades until the daily trend is known";
+    trendEl.innerHTML = `Daily trend: <strong class="${t === "UP" ? "up" : t === "DOWN" ? "down" : ""}">${t}</strong> &rarr; ${allowed}`;
+    trendEl.title = d.daily_trend_text || "";
+    // dim the side that the filter blocks
+    const hi = document.querySelector(".dt-level-high"), lo = document.querySelector(".dt-level-low");
+    if (hi) hi.style.opacity = t === "DOWN" ? 0.4 : 1;
+    if (lo) lo.style.opacity = t === "UP" ? 0.4 : 1;
+  }
+  const newsEl = el("dt-news");
+  if (newsEl && d.news) {
+    const n = d.news;
+    let txt;
+    if (!n.enabled) txt = `News filter: <strong>OFF</strong>`;
+    else if (n.blocked) txt = `News: <strong class="down">BLOCKED</strong> &rarr; ${escHtml(n.message)}`;
+    else if (n.next) {
+      const m = n.next.minutes_from_now;
+      const when = m >= 120 ? `in ${Math.round(m / 60)} h` : m >= 0 ? `in ${m} min` : `${-m} min ago`;
+      txt = `Next big USD news: <strong>${escHtml(n.next.name)}</strong> ${when} (trades paused 30 min before/after)`;
+    } else txt = n.status === "LIVE" && !/unavailable/i.test(n.message || "") ? "News: no high-impact USD news coming up" : "News: calendar unavailable (not blocking)";
+    newsEl.innerHTML = txt;
+  }
+  if (el("dt-sub")) el("dt-sub").textContent = `${d.timeframe || "H1"} · ${d.channel_bars || 100} candles`;
+  el("dt-high").textContent = fmt(d.channel_high, 2);
+  el("dt-low").textContent = fmt(d.channel_low, 2);
+  el("dt-to-buy").textContent = d.to_buy > 0 ? `+$${fmt(d.to_buy, 2)} away` : "BROKEN";
+  el("dt-to-sell").textContent = d.to_sell > 0 ? `-$${fmt(d.to_sell, 2)} away` : "BROKEN";
+  const pct = Math.max(0, Math.min(100, d.position_pct));
+  el("dt-bar-fill").style.width = pct + "%";
+  const mk = el("dt-bar-marker");
+  mk.style.left = pct + "%";
+  // keep the label inside the bar near the edges
+  mk.style.transform = pct < 12 ? "translate(0, -50%)" : pct > 88 ? "translate(-100%, -50%)" : "translate(-50%, -50%)";
+  el("dt-close").textContent = fmt(d.last_close, 2);
+
+  if (sig) {
+    if (d.signal === "BUY") { sig.textContent = "BUY BREAKOUT"; sig.className = "dt-signal dt-signal-buy"; }
+    else if (d.signal === "SELL") { sig.textContent = "SELL BREAKOUT"; sig.className = "dt-signal dt-signal-sell"; }
+    else { sig.textContent = "NO BREAKOUT"; sig.className = "dt-signal dt-signal-none"; }
+  }
+  const cndl = d.last_candle_server || "--";
+  const closedNote = d.market_open === false ? " Market is closed right now (no new prices), so nothing updates until it reopens." : "";
+  el("dt-signal-text").textContent = (d.signal === "NONE"
+    ? `Last ${d.timeframe || "H1"} candle ${cndl} · next check ~${d.next_check_server || "--"} (MT5 time)`
+    : `${d.signal} signal on the ${cndl} candle (MT5 server time). The bot enters if all risk checks pass.`) + closedNote;
+  if (sig && d.market_open === false && d.signal === "NONE") { sig.textContent = "MARKET CLOSED"; sig.className = "dt-signal dt-signal-off"; }
+
+  if (el("dt-atr-label")) el("dt-atr-label").textContent = `ATR (14, ${d.timeframe || "H1"})`;
+  el("dt-atr").textContent = `$${fmt(d.atr, 2)}`;
+  el("dt-stop").textContent = `$${fmt(d.stop_distance, 2)}`;
+  el("dt-trail").textContent = `$${fmt(d.trail_distance, 2)}`;
+  el("dt-lot").textContent = fmt(d.next_lot, 2);
+  el("dt-lot-note").textContent = d.lot_capped ? "capped by Max Lot setting" : "from Risk % setting";
+  el("dt-risk").textContent = `${money(d.next_risk_usd)} ${cur}` + (d.next_risk_pct !== null ? ` (${fmt(d.next_risk_pct, 2)}% of equity)` : "");
+
+  const box = el("dt-positions");
+  const pos = d.positions || [];
+  el("dt-pos-count").textContent = `${pos.length} OPEN`;
+  if (!pos.length) {
+    box.innerHTML = `<p class="dt-note">No open trades. The bot waits for a breakout, then manages the stop automatically.</p>`;
+    return;
+  }
+  box.innerHTML = pos.map(p => {
+    const buy = p.side === "BUY";
+    const pnlColor = (p.pnl_usd || 0) >= 0 ? "var(--accent-emerald)" : "var(--accent-red)";
+    const locked = p.locked_usd === null ? "no stop" : (p.locked_usd >= 0 ? `locks ${money(p.locked_usd)} profit` : `risk ${money(-p.locked_usd)}`);
+    const moves = buy ? p.next_trail > p.sl : (p.sl === 0 || p.next_trail < p.sl);
+    return `<div class="dt-pos">
+      <span class="side ${buy ? "buy" : "sell"}">${p.side}</span>
+      <span class="meta">#${escHtml(String(p.ticket))} · ${fmt(p.lots, 2)} lot @ ${fmt(p.entry, 2)}</span>
+      <span class="pnl" style="color:${pnlColor}">${money(p.pnl_usd)}</span>
+      <span class="sub">Stop ${fmt(p.sl, 2)} (${locked}) · next trail ${fmt(p.next_trail, 2)}${moves ? " ↑ will move" : ""}</span>
+    </div>`;
+  }).join("");
 }
 
 document.addEventListener("DOMContentLoaded", bootstrap);

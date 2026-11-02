@@ -332,18 +332,42 @@ class TradeManager:
                     "message": f"Trade Blocked: {can_msg}"
                 }
 
-        # 3. Strategy Decision Engine Evaluation
-        candles = mt5_adapter.fetch_candles(symbol, timeframe, 200)
-        ticker = mt5_adapter.get_ticker(symbol)
-        
-        m1_candles = mt5_adapter.fetch_candles(symbol, "M1", 100)
-        m5_candles = mt5_adapter.fetch_candles(symbol, "M5", 100)
-        m15_candles = mt5_adapter.fetch_candles(symbol, "M15", 100)
-        h1_candles = mt5_adapter.fetch_candles(symbol, "H1", 100)
-        h4_candles = mt5_adapter.fetch_candles(symbol, "H4", 100)
-        htf_candles = {"M1": m1_candles, "M5": m5_candles, "M15": m15_candles, "H1": h1_candles, "H4": h4_candles}
+        # 3a. Backtested Donchian Trend strategy (bypasses the legacy multi-setup engine)
+        from app.services import donchian_trend
+        if getattr(self.risk_settings, "strategy_profile", "") == donchian_trend.STRATEGY_PROFILE:
+            from app.services.symbol_specs import get_symbol_specs
+            d_tf = donchian_trend.active_timeframe(self.risk_settings)
+            h1 = donchian_trend.fetch_bars(mt5_adapter, symbol, d_tf)
+            ticker = mt5_adapter.get_ticker(symbol)
+            pip = float(get_symbol_specs(symbol).get("pip_size", 0.10) or 0.10)
+            max_spread = float(getattr(self.risk_settings, "max_spread_pips", 3.0) or 0) * pip or None
+            report = donchian_trend.evaluate(symbol, h1, ticker, max_spread, tf=d_tf,
+                                            daily=donchian_trend.fetch_daily(mt5_adapter, symbol))
+            # High-impact USD news blackout (30 min before/after) blocks NEW entries only.
+            if report.decision != TradeSide.HOLD and getattr(self.risk_settings, "news_filter_enabled", True):
+                from app.services.news_filter import news_filter
+                blocked, news_msg = news_filter.is_news_blackout(symbol)
+                if blocked:
+                    report.decision = TradeSide.HOLD
+                    report.setup_name = "None"
+                    report.rejection_reasons = ["NEWS_BLOCKED", news_msg]
+                    report.reasoning.append(news_msg)
+                    report.summary_explanation = f"Breakout skipped: {news_msg}"
+            candles = h1
+            timeframe = d_tf
+        else:
+            # 3. Legacy Strategy Decision Engine Evaluation
+            candles = mt5_adapter.fetch_candles(symbol, timeframe, 200)
+            ticker = mt5_adapter.get_ticker(symbol)
 
-        report = decision_engine.evaluate_trade_opportunity(symbol, candles, ticker, timeframe, htf_candles=htf_candles)
+            m1_candles = mt5_adapter.fetch_candles(symbol, "M1", 100)
+            m5_candles = mt5_adapter.fetch_candles(symbol, "M5", 100)
+            m15_candles = mt5_adapter.fetch_candles(symbol, "M15", 100)
+            h1_candles = mt5_adapter.fetch_candles(symbol, "H1", 100)
+            h4_candles = mt5_adapter.fetch_candles(symbol, "H4", 100)
+            htf_candles = {"M1": m1_candles, "M5": m5_candles, "M15": m15_candles, "H1": h1_candles, "H4": h4_candles}
+
+            report = decision_engine.evaluate_trade_opportunity(symbol, candles, ticker, timeframe, htf_candles=htf_candles)
         
         # Validation for pending signal confirmation: abort execution if fresh evaluation direction differs from pending direction
         if is_confirming_execution and self.pending_confirmation is not None:
@@ -710,10 +734,69 @@ class TradeManager:
             )
 
     def modify_position(self, trade_id: str, new_sl: float, new_tp: float) -> Tuple[bool, str]:
-        res = mt5_adapter.update_sl_tp(trade_id, new_sl, new_tp)
-        if res:
-            return True, f"Position {trade_id} SL/TP updated successfully"
-        return False, "Failed to update position SL/TP"
+        """Change SL/TP of an open position after checking the values are safe.
+
+        SL is required (a position without a stop has unlimited risk). TP may be 0 (no target).
+        """
+        trade_id = str(trade_id).strip()
+        try:
+            new_sl, new_tp = float(new_sl), float(new_tp)
+        except (TypeError, ValueError):
+            return False, "SL and TP must be numbers"
+        if new_sl != new_sl or new_tp != new_tp or new_sl < 0 or new_tp < 0:
+            return False, "SL and TP must be positive numbers"
+        if new_sl <= 0:
+            return False, "Stop Loss is required. A position without a stop has unlimited risk."
+
+        positions = mt5_adapter.get_positions()
+        if not getattr(mt5_adapter, "positions_ok", True):
+            return False, "Could not read open positions from MT5. Try again."
+        pos = next((p for p in positions if str(p.trade_id) == trade_id), None)
+        if pos is None:
+            return False, f"Position {trade_id} not found (it may already be closed)"
+
+        ticker = mt5_adapter.get_ticker(pos.symbol)
+        if ticker is None or not ticker.bid or not ticker.ask:
+            return False, "No live price for this symbol right now (market closed or MT5 disconnected)"
+
+        from app.services.symbol_specs import get_symbol_specs
+        specs = get_symbol_specs(pos.symbol)
+        digits = int((specs or {}).get("digits", 2) or 2)
+        new_sl, new_tp = round(new_sl, digits), round(new_tp, digits)
+        is_buy = getattr(pos.side, "value", str(pos.side)) == "BUY"
+        gap = mt5_adapter.min_stop_distance(pos.symbol)
+        bid, ask = float(ticker.bid), float(ticker.ask)
+
+        if is_buy:
+            if new_sl >= bid - gap:
+                return False, f"BUY stop loss must be below the current price {bid:.{digits}f}" + (f" by at least {gap:.{digits}f}" if gap else "")
+            if new_tp and new_tp <= ask + gap:
+                return False, f"BUY take profit must be above the current price {ask:.{digits}f}" + (f" by at least {gap:.{digits}f}" if gap else "")
+        else:
+            if new_sl <= ask + gap:
+                return False, f"SELL stop loss must be above the current price {ask:.{digits}f}" + (f" by at least {gap:.{digits}f}" if gap else "")
+            if new_tp and new_tp >= bid - gap:
+                return False, f"SELL take profit must be below the current price {bid:.{digits}f}" + (f" by at least {gap:.{digits}f}" if gap else "")
+
+        old_sl, old_tp = round(float(pos.sl_price or 0), digits), round(float(pos.tp_price or 0), digits)
+        if new_sl == old_sl and new_tp == old_tp:
+            return False, "Nothing changed: SL and TP are the same as now"
+
+        if not mt5_adapter.update_sl_tp(trade_id, new_sl, new_tp):
+            return False, getattr(mt5_adapter, "last_sltp_error", "") or "Failed to update position SL/TP"
+
+        # Keep the in-memory copy in step so trailing starts from the new stop immediately.
+        cached = self.active_trades.get(trade_id)
+        if cached is not None:
+            cached.sl_price, cached.tp_price = new_sl, new_tp
+
+        logger.info(f"[MANUAL SLTP] #{trade_id} SL {old_sl} -> {new_sl}, TP {old_tp} -> {new_tp}")
+        msg = f"Position {trade_id} updated: SL {new_sl:.{digits}f}, TP {new_tp:.{digits}f}" if new_tp else \
+              f"Position {trade_id} updated: SL {new_sl:.{digits}f}, no TP"
+        widened = (new_sl < old_sl) if is_buy else (new_sl > old_sl)
+        if old_sl and widened and self.risk_settings.auto_trailing_stop_enabled:
+            msg += ". Note: the stop was moved further away; the trailing stop may tighten it again at the next candle close."
+        return True, msg
 
     # ── POSITION MONITORING & TRAILING STOP ────────────────────────
 
@@ -730,6 +813,12 @@ class TradeManager:
         # 1. Fetch live open positions from MT5 (Authoritative Snapshot)
         live_positions_list = mt5_adapter.get_positions()
         live_positions = {p.trade_id: p for p in live_positions_list}
+
+        # MT5 call failed: don't treat every open trade as closed (that wrote
+        # fake "closed, $0" records and let the bot open duplicate positions).
+        if use_live and not getattr(mt5_adapter, "positions_ok", True):
+            logger.warning("[POSITION_SYNC] Skipping reconciliation: could not read positions from MT5.")
+            return [t for t in self.active_trades.values() if t.symbol == symbol and t.state == TradeState.OPEN]
 
         # If live MT5 mode is disabled (Paper Trading Mode) and get_positions returns empty
         if not use_live and len(live_positions_list) == 0:
@@ -791,16 +880,16 @@ class TradeManager:
         return live_positions_list
 
     def update_open_positions(self, symbol: str):
-        ticker = mt5_adapter.get_ticker(symbol)
-        if not ticker:
-            return
-        curr_price = ticker.bid
-
-        # Perform authoritative reconciliation
+        # Always reconcile first (detect closed trades), even if no price is available.
         live_positions_list = self.reconcile_positions(symbol)
         live_positions = {p.trade_id: p for p in live_positions_list}
 
+        ticker = mt5_adapter.get_ticker(symbol)
+        if not ticker:
+            return
+
         # 2. Apply trailing stop / break-even check for currently active positions
+        donchian_h1 = None  # fetched lazily, once per cycle
         for trade_id, trade in list(self.active_trades.items()):
             if trade.symbol != symbol or trade.state != TradeState.OPEN:
                 continue
@@ -840,6 +929,24 @@ class TradeManager:
             # ── PEAK PROFIT RR TRACKING (no look-ahead — uses only current price) ──
             if profit_rr > trade.peak_profit_rr:
                 trade.peak_profit_rr = profit_rr
+
+            # Donchian Trend mode: only the backtested H1 chandelier trailing stop.
+            # Giveback guard / break-even / M1-ATR trailing are skipped because they
+            # cut winners early (the old average exit was ~$4 against a ~$9.5 stop).
+            from app.services import donchian_trend
+            if getattr(self.risk_settings, "strategy_profile", "") == donchian_trend.STRATEGY_PROFILE:
+                if donchian_h1 is None:
+                    donchian_h1 = mt5_adapter.fetch_candles(symbol, donchian_trend.active_timeframe(self.risk_settings), 60) or []
+                new_sl = donchian_trend.trailing_stop(donchian_h1, is_buy, trade.sl_price)
+                if new_sl is not None:
+                    new_sl = round(new_sl, digits)
+                    # never place the stop on the wrong side of price
+                    valid = new_sl < eval_price if is_buy else new_sl > eval_price
+                    if valid and abs(new_sl - trade.sl_price) > 1.5 * pip_size:
+                        if mt5_adapter.update_sl_tp(trade_id, new_sl=new_sl, new_tp=trade.tp_price):
+                            logger.info(f"[DONCHIAN TRAIL] {trade_id} SL {trade.sl_price} -> {new_sl}")
+                            trade.sl_price = new_sl
+                continue
 
             # Read dynamic trailing settings
             activation_rr = float(getattr(self.risk_settings, "trailing_activation_rr", 1.2))

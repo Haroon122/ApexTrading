@@ -276,7 +276,15 @@ class GoldTradingWorker:
                     report = res.get("report")
 
                 if not report:
-                    report = decision_engine.evaluate_trade_opportunity(self.symbol, candles, ticker, self.timeframe, htf_candles=htf_candles)
+                    from app.services import donchian_trend
+                    if getattr(trade_manager.risk_settings, "strategy_profile", "") == donchian_trend.STRATEGY_PROFILE:
+                        # Show the strategy that actually trades, not the legacy engine.
+                        d_tf = donchian_trend.active_timeframe(trade_manager.risk_settings)
+                        h1_full = donchian_trend.fetch_bars(mt5_adapter, self.symbol, d_tf)
+                        report = donchian_trend.evaluate(self.symbol, h1_full, ticker, tf=d_tf,
+                                                         daily=donchian_trend.fetch_daily(mt5_adapter, self.symbol))
+                    else:
+                        report = decision_engine.evaluate_trade_opportunity(self.symbol, candles, ticker, self.timeframe, htf_candles=htf_candles)
 
                 # Authoritative position reconciliation & monitoring
                 trade_manager.update_open_positions(self.symbol)

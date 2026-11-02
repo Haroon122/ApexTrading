@@ -57,6 +57,8 @@ class RiskManager:
         # 3. Check Maximum Open Trades (using live MT5 position count or fallback)
         from app.adapters.mt5_adapter import mt5_adapter
         live_positions = mt5_adapter.get_positions()
+        if mt5_adapter.is_connected and not getattr(mt5_adapter, "positions_ok", True):
+            reasons.append("Could not read open positions from MT5. New trades blocked until MT5 responds.")
         open_count = len(live_positions) if mt5_adapter.is_connected else account.open_positions_count
         
         max_positions = int(getattr(risk_cfg, "max_open_positions", settings.MAX_OPEN_TRADES))
@@ -161,7 +163,17 @@ class RiskManager:
                 break
                 
         max_consec_losses = int(getattr(risk_cfg, "max_consecutive_losses", 5))
-        is_breaker_active = consecutive_losses >= max_consec_losses
+        # 0 disables the breaker (previously 0 blocked every trade).
+        is_breaker_active = max_consec_losses > 0 and consecutive_losses >= max_consec_losses
+        # Auto-release after 24h; otherwise no new trade can ever produce the win
+        # needed to reset the streak, and the bot stays locked forever.
+        if is_breaker_active and recent_closed:
+            try:
+                last_close = datetime.fromisoformat(str(recent_closed[0].get("close_timestamp"))[:26])
+                if (datetime.now() - last_close).total_seconds() > 24 * 3600:
+                    is_breaker_active = False
+            except Exception:
+                pass
 
         if is_breaker_active:
             reasons.append(
@@ -238,9 +250,9 @@ class RiskManager:
 
         # Safety Check: Hard Maximum Allowed Lot Cap
         if lot_mode == "DYNAMIC_RISK":
-            # Auto-adjust cap based on equity ($1,000 equity = 1.0 lot cap), up to broker vol_max
-            dynamic_equity_cap = max(max_allowed_lot, round(account.equity / 1000.0, 2))
-            effective_max_lot = min(vol_max, dynamic_equity_cap)
+            # The user's max lot is a hard cap. (It used to be raised to equity/1000, so the
+            # lot passed here and was then BLOCKED by the same cap in execute_decision.)
+            effective_max_lot = min(vol_max, max_allowed_lot)
 
             # Rejection safety for extreme SL division glitches (> 500 lots)
             if calculated_lots > 500.0:
