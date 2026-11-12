@@ -229,7 +229,10 @@ async def start_bot(
 ) -> Dict[str, Any]:
     # Donchian Trend always enters on H1; the chart timeframe sent by the dashboard
     # must not overwrite it.
-    if getattr(trade_manager.risk_settings, "strategy_profile", "") == "DONCHIAN_TREND":
+    from app.services import portfolio_trend
+    if portfolio_trend.is_active(trade_manager.risk_settings):
+        timeframe = "H1"   # portfolio strategies use their own timeframes (portfolio_*_tf); entry_timeframe is unused
+    elif getattr(trade_manager.risk_settings, "strategy_profile", "") == "DONCHIAN_TREND":
         from app.services import donchian_trend
         timeframe = donchian_trend.active_timeframe(trade_manager.risk_settings)
     if timeframe:
@@ -320,11 +323,43 @@ def donchian_status(symbol: str = Query(default=settings.DEFAULT_SYMBOL)) -> Dic
     acc = mt5_adapter.get_account_info()
     d_tf = donchian_trend.active_timeframe(rs)
     data = donchian_trend.status(
-        sym, donchian_trend.fetch_bars(mt5_adapter, sym, d_tf),
+        sym, donchian_trend.fetch_bars(mt5_adapter, sym, d_tf, rs=rs),
         mt5_adapter.get_ticker(sym), float(getattr(acc, "equity", 0.0) or 0.0),
         float(rs.max_risk_per_trade_pct), float(rs.max_allowed_lot), mt5_adapter.get_positions(),
-        daily=donchian_trend.fetch_daily(mt5_adapter, sym), tf=d_tf)
+        daily=donchian_trend.fetch_daily(mt5_adapter, sym, rs=rs, tf=d_tf), tf=d_tf, rs=rs)
     data["active"] = getattr(rs, "strategy_profile", "") == donchian_trend.STRATEGY_PROFILE
+    from app.services.news_filter import news_filter, next_high_impact
+    news_on = bool(getattr(rs, "news_filter_enabled", True))
+    blocked, msg = news_filter.is_news_blackout(sym) if news_on else (False, "News filter off")
+    data["news"] = {"enabled": news_on, "blocked": blocked, "message": msg,
+                    "status": news_filter.get_news_status(), "next": next_high_impact(sym)}
+    data["currency"] = getattr(acc, "currency", "USD") or "USD"
+    return data
+
+
+@router.get("/market/levels")
+def market_levels(symbol: str = Query(default=settings.DEFAULT_SYMBOL),
+                  timeframe: str = Query(default="M15")) -> Dict[str, Any]:
+    """Automatic support / resistance levels for the chart (display only, not used for trading)."""
+    from app.services import support_resistance
+    tf = timeframe.upper()
+    if tf not in support_resistance.TF_RANK:
+        raise HTTPException(status_code=400, detail=f"Unsupported timeframe {timeframe}")
+    ticker = mt5_adapter.get_ticker(symbol)
+    price = float(ticker.bid) if ticker is not None else None
+    return support_resistance.get_levels(mt5_adapter, symbol, tf, price)
+
+
+@router.get("/strategy/portfolio/status")
+def portfolio_status(symbol: str = Query(default=settings.DEFAULT_SYMBOL)) -> Dict[str, Any]:
+    """Live status of the three PORTFOLIO_TREND strategies (signals, levels, next-trade plan, open trades)."""
+    from app.services import portfolio_trend
+    rs = trade_manager.risk_settings
+    sym = mt5_adapter.discover_gold_symbol() or symbol
+    acc = mt5_adapter.get_account_info()
+    ticker = mt5_adapter.get_ticker(sym)
+    data = portfolio_trend.status_all(mt5_adapter, sym, rs, float(getattr(acc, "equity", 0.0) or 0.0),
+                                      mt5_adapter.get_positions(), ticker)
     from app.services.news_filter import news_filter, next_high_impact
     news_on = bool(getattr(rs, "news_filter_enabled", True))
     blocked, msg = news_filter.is_news_blackout(sym) if news_on else (False, "News filter off")
@@ -339,12 +374,18 @@ def evaluate_trade(
     symbol: str = Query(default=settings.DEFAULT_SYMBOL),
     timeframe: str = Query(default="M15")
 ) -> TradeDecisionReport:
-    from app.services import donchian_trend
+    from app.services import donchian_trend, portfolio_trend
+    if portfolio_trend.is_active(trade_manager.risk_settings):
+        reports = portfolio_trend.evaluate_all(mt5_adapter, symbol, trade_manager.risk_settings)
+        primary = portfolio_trend.primary_report(reports)
+        if primary is not None:
+            return primary
     if getattr(trade_manager.risk_settings, "strategy_profile", "") == donchian_trend.STRATEGY_PROFILE:
         d_tf = donchian_trend.active_timeframe(trade_manager.risk_settings)
-        h1 = donchian_trend.fetch_bars(mt5_adapter, symbol, d_tf)
-        return donchian_trend.evaluate(symbol, h1, mt5_adapter.get_ticker(symbol), tf=d_tf,
-                                       daily=donchian_trend.fetch_daily(mt5_adapter, symbol))
+        rs = trade_manager.risk_settings
+        h1 = donchian_trend.fetch_bars(mt5_adapter, symbol, d_tf, rs=rs)
+        return donchian_trend.evaluate(symbol, h1, mt5_adapter.get_ticker(symbol), tf=d_tf, rs=rs,
+                                       daily=donchian_trend.fetch_daily(mt5_adapter, symbol, rs=rs, tf=d_tf))
 
     candles = mt5_adapter.fetch_candles(symbol, timeframe, 200)
     ticker = mt5_adapter.get_ticker(symbol)
@@ -514,7 +555,33 @@ def update_risk_settings(settings_data: RiskSettings) -> Dict[str, Any]:
     from app.services import donchian_trend
     old_tf = donchian_trend.active_timeframe(trade_manager.risk_settings)
     new_tf = donchian_trend.active_timeframe(settings_data)
-    if new_tf != old_tf:
+    # Refuse breakout/trend settings that backtested badly (or were never tested). Only while the
+    # Donchian strategy is selected, so a stale value can't block saving unrelated settings;
+    # the engine ignores invalid values anyway (donchian_trend.effective_params).
+    bad = None
+    from app.services import portfolio_trend
+    if portfolio_trend.is_active(settings_data):
+        enabled = portfolio_trend.enabled_keys(settings_data)
+        if not enabled:
+            bad = "Enable at least one portfolio strategy (Donchian, Supertrend or Pullback)."
+        elif settings_data.max_open_positions < len(enabled):
+            bad = (f"Max Open Positions is {settings_data.max_open_positions} but {len(enabled)} portfolio strategies are enabled; "
+                   f"a signal would be blocked whenever all are in a trade. Set it to at least {len(enabled)}.")
+        elif not (0.1 <= settings_data.portfolio_risk_per_strategy_pct <= 2.0):
+            bad = "Risk per strategy must be between 0.1% and 2.0%."
+        elif portfolio_trend.validate_timeframes(settings_data):
+            bad = portfolio_trend.validate_timeframes(settings_data)
+        elif "DONCHIAN" in enabled:
+            bad = donchian_trend.validate_params(settings_data.donchian_channel_hours, settings_data.donchian_trend_sma,
+                                                 portfolio_trend.tf_of("DONCHIAN", settings_data))
+    if bad:
+        pass
+    elif getattr(settings_data, "strategy_profile", "") == donchian_trend.STRATEGY_PROFILE:
+        bad = donchian_trend.validate_params(settings_data.donchian_channel_hours, settings_data.donchian_trend_sma, new_tf)
+    if bad:
+        return {"success": False, "message": f"Not saved: {bad}",
+                "settings": trade_manager.risk_settings.model_dump()}
+    if new_tf != old_tf and not portfolio_trend.is_active(settings_data):
         sym = mt5_adapter.discover_gold_symbol()
         open_gold = [p for p in mt5_adapter.get_positions() if p.symbol == sym]
         if open_gold:

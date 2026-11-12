@@ -55,3 +55,6 @@ scratch_*.txt
 backend/scratch_*.txt
 *.deprecated
 
+
+# Research price exports (re-create with the snippet in backend/research/README.md)
+backend/research/xau_*.csv

@@ -26,6 +26,8 @@ class RiskManager:
         # 1. Check Circuit Breaker: Daily Loss Limit (Single source of truth from user Risk Settings)
         from app.services.trade_manager import trade_manager
         risk_cfg = trade_manager.risk_settings
+        from app.services import portfolio_trend
+        portfolio = portfolio_trend.is_active(risk_cfg)
         
         daily_loss_pct = float(getattr(risk_cfg, "daily_loss_limit_pct", settings.DAILY_LOSS_LIMIT_PCT))
         if account.daily_pnl_usd <= -(account.balance * (daily_loss_pct / 100.0)):
@@ -76,7 +78,7 @@ class RiskManager:
 
         all_active = live_positions if mt5_adapter.is_connected else list(trade_manager.active_trades.values())
         entry_p = report.suggested_entry
-        if entry_p > 0 and all_active:
+        if entry_p > 0 and all_active and not portfolio:
             for pos in all_active:
                 if pos.symbol == symbol and getattr(pos, 'state', None) == TradeState.OPEN:
                     dist_pips = abs(entry_p - pos.entry_price) / pip_size
@@ -92,7 +94,21 @@ class RiskManager:
         # direction within minutes, all stopped out together.
         max_per_dir = int(getattr(risk_cfg, "max_positions_per_direction", 1) or 0)
         side_val = getattr(report.decision, "value", str(report.decision))
-        if max_per_dir > 0 and all_active:
+        if portfolio and all_active:
+            # Strategies are allowed to hold positions at similar prices (each has its own stop and
+            # exit), but never opposite directions at once: that would be a hedge that earns nothing.
+            opposite = [
+                p for p in all_active
+                if p.symbol == symbol
+                and getattr(p, "state", None) == TradeState.OPEN
+                and getattr(p.side, "value", str(p.side)) != side_val
+            ]
+            if opposite:
+                reasons.append(
+                    f"HEDGE GUARD: {len(opposite)} opposite-direction position(s) already open on {symbol}; "
+                    f"a {side_val} entry would hedge them."
+                )
+        if max_per_dir > 0 and all_active and not portfolio:
             same_dir = [
                 p for p in all_active
                 if p.symbol == symbol
@@ -109,7 +125,7 @@ class RiskManager:
         # the database so it survives restarts (in-memory cooldown resets on restart).
         from app.services.trade_learner import trade_learner
         min_gap_min = float(getattr(risk_cfg, "min_minutes_between_entries", 30) or 0)
-        if min_gap_min > 0:
+        if min_gap_min > 0 and not portfolio:
             last_open = trade_learner.get_last_open_timestamp(symbol)
             if last_open is not None:
                 gap = (datetime.now() - last_open).total_seconds() / 60.0
@@ -138,7 +154,9 @@ class RiskManager:
         
         # Cooldown Check
         cooldown_seconds = int(getattr(risk_cfg, "auto_trade_cooldown_seconds", 300))
-        if cooldown_seconds > 0 and recent_closed:
+        # Portfolio mode: several strategies legitimately signal on the same candle close, so a global
+        # cooldown after the previous entry/exit would block valid signals the backtest took.
+        if cooldown_seconds > 0 and recent_closed and not portfolio:
             last_trade = recent_closed[0]
             close_ts_str = last_trade.get("close_timestamp")
             if close_ts_str:
@@ -193,6 +211,8 @@ class RiskManager:
         max_allowed_lot = float(getattr(risk_cfg, "max_allowed_lot", 1.00) or 1.00)
         default_lot = float(getattr(risk_cfg, "default_lot_size", 0.01) or 0.01)
         user_max_risk_pct = float(getattr(risk_cfg, "max_risk_per_trade_pct", settings.MAX_RISK_PER_TRADE_PCT))
+        if portfolio:
+            user_max_risk_pct = float(getattr(risk_cfg, "portfolio_risk_per_strategy_pct", 0.5) or 0.5)
         
         from app.services.gold_specs import gold_specs
         specs = gold_specs.get_specs()

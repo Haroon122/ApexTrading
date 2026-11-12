@@ -1,7 +1,9 @@
 """
 Donchian Trend strategy for XAUUSD. Runs on ONE timeframe at a time, chosen by the
-user (RiskSettings.donchian_timeframe): H1 (100-candle channel) or M15 (400-candle
-channel, the same ~100-hour window on a finer chart).
+user (RiskSettings.donchian_timeframe): H1 or M15. The breakout channel length is set in
+HOURS (RiskSettings.donchian_channel_hours, default 100 = 100 H1 candles or 400 M15 candles)
+and the daily trend average in days (RiskSettings.donchian_trend_sma, default 200); both
+are range-checked against the backtests (validate_params).
 
 Rules (same as the research backtest, Oct 2026, 2018-2026 H1 data):
   Entry : a CLOSED H1 candle closes above the highest high of the previous
@@ -34,21 +36,36 @@ from app.domain.models import (
 logger = logging.getLogger("ApexTrader.DonchianTrend")
 
 STRATEGY_PROFILE = "DONCHIAN_TREND"
-SETUP_NAME = "DONCHIAN TREND: H1 100-bar Breakout"
+SETUP_NAME = "DONCHIAN TREND: H1 100-bar Breakout"  # name with the default settings
 TIMEFRAME = "H1"
 CHANNEL = 100
 ATR_PERIOD = 14
 STOP_ATR = 3.0
 TRAIL_ATR = 4.0
 FAR_TP_R = 10.0
-CANDLES_NEEDED = 300
 # Per-timeframe settings. Both use the same stop/trail multiples and daily filter.
 VARIANTS = {
-    "H1": {"channel": 100, "candles": 300, "minutes": 60},
-    "M15": {"channel": 400, "candles": 600, "minutes": 15},
+    "H1": {"channel": 100, "minutes": 60},    # "channel" = default candles (see DEFAULT_CHANNEL_HOURS)
+    "M15": {"channel": 400, "minutes": 15},
 }
 TREND_SMA = 200
-DAILY_NEEDED = TREND_SMA + 10
+
+# ── User-adjustable settings (RiskSettings.donchian_channel_hours / donchian_trend_sma) ──
+# The channel is set in HOURS so it means the same on H1 and M15 (H1: 100h = 100 candles,
+# M15: 100h = 400 candles). Defaults = the originally backtested 100h / 200 days.
+DEFAULT_CHANNEL_HOURS = 100
+DEFAULT_TREND_SMA = TREND_SMA
+WARMUP_BARS = 200  # extra candles fetched beyond the channel so ATR is settled
+# Allowed ranges come from the 2016-2026 XAUUSD H1 grid (90 channel x SMA combinations; 98% had
+# PF > 1 in both halves, so 100h/200d is not a lucky spike). The refused corners are the ones whose
+# 3x-cost PF fell to ~1.0 or whose bootstrap 5th-percentile PF was <= 1.03. Anything outside the
+# tested grid is refused too.
+CHANNEL_HOURS_LIMITS = {"H1": (40, 200), "M15": (50, 200)}
+SMA_LIMITS = (50, 250)
+SHORT_CHANNEL_HOURS = 70      # below this a slow (>120d) trend average had weak bootstrap PF / deep drawdown
+SHORT_CHANNEL_MAX_SMA = 120
+FAST_SMA_DAYS = 80            # below this a short channel (<85h) had 3x-cost PF 0.99-1.09
+FAST_SMA_MIN_CHANNEL_HOURS = 85
 
 
 def variant(tf: Optional[str]) -> Tuple[str, dict]:
@@ -61,8 +78,61 @@ def active_timeframe(risk_settings) -> str:
     return variant(getattr(risk_settings, "donchian_timeframe", TIMEFRAME))[0]
 
 
-def setup_name(tf: str) -> str:
-    return f"DONCHIAN TREND: {tf} {VARIANTS[tf]['channel']}-bar Breakout"
+def setup_name(tf: str, channel: Optional[int] = None) -> str:
+    return f"DONCHIAN TREND: {tf} {channel or VARIANTS[tf]['channel']}-bar Breakout"
+
+
+def channel_bars_for(tf: str, channel_hours: int) -> int:
+    """Hours -> candles for the timeframe (H1: x1, M15: x4)."""
+    return max(1, int(round(channel_hours * 60 / VARIANTS[tf]["minutes"])))
+
+
+def validate_params(channel_hours: int, sma: int, tf: str) -> Optional[str]:
+    """None if the (channel, SMA) pair is inside the backtested safe range, else the reason."""
+    tf, _ = variant(tf)
+    lo, hi = CHANNEL_HOURS_LIMITS[tf]
+    if channel_hours < lo:
+        return (f"Breakout lookback of {channel_hours} hours is too short for {tf}. Backtests (2016-2026) "
+                f"showed more false breakouts and thin margins below {lo} hours "
+                f"(30h with a 100-day average: PF 1.25 but PF 1.09 at 3x costs, 4 of 11 years lost). Allowed: {lo}-{hi} hours.")
+    if channel_hours > hi:
+        return (f"Breakout lookback of {channel_hours} hours is longer than anything backtested. "
+                f"Allowed: {lo}-{hi} hours.")
+    slo, shi = SMA_LIMITS
+    if sma < slo:
+        return (f"Daily trend average of {sma} days is too short. At 30 days every channel length tested was weak "
+                f"(PF 1.07-1.32, and 0.93-1.18 at 3x costs, i.e. often unprofitable once spreads widen). "
+                f"Allowed: {slo}-{shi} days.")
+    if sma > shi:
+        return f"Daily trend average of {sma} days is longer than anything backtested. Allowed: {slo}-{shi} days."
+    if channel_hours < SHORT_CHANNEL_HOURS and sma > SHORT_CHANNEL_MAX_SMA:
+        return (f"A short breakout lookback ({channel_hours}h, under {SHORT_CHANNEL_HOURS}h) with a slow "
+                f"{sma}-day trend average backtested worse (bootstrap PF 1.01-1.06, drawdown up to 52R). "
+                f"Use a trend average of {FAST_SMA_DAYS}-{SHORT_CHANNEL_MAX_SMA} days with it, or a lookback of "
+                f"{SHORT_CHANNEL_HOURS}+ hours.")
+    if sma < FAST_SMA_DAYS and channel_hours < FAST_SMA_MIN_CHANNEL_HOURS:
+        return (f"A fast {sma}-day trend average with a short {channel_hours}h lookback backtested poorly "
+                f"(PF at 3x costs 0.99-1.09, bootstrap PF below 1.03). With a trend average under "
+                f"{FAST_SMA_DAYS} days use a lookback of {FAST_SMA_MIN_CHANNEL_HOURS}+ hours.")
+    return None
+
+
+_warned: set = set()
+
+
+def effective_params(rs, tf: str) -> Tuple[int, int]:
+    """(channel candles, trend SMA days) the engine really uses. Values that fail validation
+    (e.g. a hand-edited settings file) fall back to the proven defaults instead of trading them."""
+    tf, _ = variant(tf)
+    hours = getattr(rs, "donchian_channel_hours", DEFAULT_CHANNEL_HOURS) if rs is not None else DEFAULT_CHANNEL_HOURS
+    sma = getattr(rs, "donchian_trend_sma", DEFAULT_TREND_SMA) if rs is not None else DEFAULT_TREND_SMA
+    err = validate_params(hours, sma, tf)
+    if err:
+        if (tf, hours, sma) not in _warned:   # log once per bad value, not on every tick
+            _warned.add((tf, hours, sma))
+            logger.warning("Donchian settings rejected (%s); using defaults %sh / %sd", err, DEFAULT_CHANNEL_HOURS, DEFAULT_TREND_SMA)
+        hours, sma = DEFAULT_CHANNEL_HOURS, DEFAULT_TREND_SMA
+    return channel_bars_for(tf, hours), sma
 
 
 def closed_only(candles: List[Candle]) -> List[Candle]:
@@ -116,16 +186,17 @@ def daily_trend(daily: Optional[List[Candle]], sma: int = TREND_SMA) -> Tuple[in
 
 def evaluate(symbol: str, candles: List[Candle], ticker: Optional[TickerData],
              max_spread_price: Optional[float] = None,
-             daily: Optional[List[Candle]] = None, tf: str = TIMEFRAME) -> TradeDecisionReport:
+             daily: Optional[List[Candle]] = None, tf: str = TIMEFRAME, rs=None) -> TradeDecisionReport:
     """Build a TradeDecisionReport the existing pipeline can execute."""
     tf, cfg = variant(tf)
-    name = setup_name(tf)
+    channel, sma = effective_params(rs, tf)
+    name = setup_name(tf, channel)
     bars = closed_only(candles or [])
     reasoning: List[str] = [f"Strategy: {name}"]
     rejections: List[str] = []
-    signal, why = breakout_signal(bars, cfg["channel"])
+    signal, why = breakout_signal(bars, channel)
     reasoning.append(why)
-    trend, trend_why = daily_trend(daily)
+    trend, trend_why = daily_trend(daily, sma)
     reasoning.append(trend_why)
     if signal != 0 and trend != signal:
         side = "BUY" if signal == 1 else "SELL"
@@ -185,13 +256,13 @@ def trailing_stop(candles: List[Candle], is_buy: bool, current_sl: float) -> Opt
 
 def status(symbol: str, candles: List[Candle], ticker: Optional[TickerData],
            equity: float, risk_pct: float, max_lot: float, positions: list,
-           daily: Optional[List[Candle]] = None, tf: str = TIMEFRAME) -> dict:
+           daily: Optional[List[Candle]] = None, tf: str = TIMEFRAME, rs=None) -> dict:
     """Snapshot for the dashboard: where price is vs the channel, next-trade plan,
     and the trailing stop of open positions."""
     tf, cfg = variant(tf)
-    channel = cfg["channel"]
+    channel, sma = effective_params(rs, tf)
     bars = closed_only(candles or [])
-    out = {"ok": False, "symbol": symbol, "timeframe": tf, "channel_bars": channel}
+    out = {"ok": False, "symbol": symbol, "timeframe": tf, "channel_bars": channel, "trend_sma": sma}
     if len(bars) < channel + 2:
         out["message"] = f"Waiting for data ({len(bars)}/{channel + 2} closed {tf} candles)"
         return out
@@ -209,7 +280,7 @@ def status(symbol: str, candles: List[Candle], ticker: Optional[TickerData],
     lot = max(0.01, min(max_lot, int(raw_lot * 100) / 100.0)) if equity > 0 else 0.01
     risk_usd = lot * loss_per_lot
     sig, why = breakout_signal(bars, channel)
-    trend, trend_why = daily_trend(daily)
+    trend, trend_why = daily_trend(daily, sma)
     if sig != 0 and trend != sig:
         why = f"Breakout skipped (against daily trend). {why}"
         sig = 0
@@ -261,10 +332,12 @@ def status(symbol: str, candles: List[Candle], ticker: Optional[TickerData],
 _last_tick: dict = {}
 
 
-def fetch_daily(adapter, symbol: str) -> List[Candle]:
-    return adapter.fetch_candles(symbol, "D1", DAILY_NEEDED) or []
+def fetch_daily(adapter, symbol: str, rs=None, tf: str = TIMEFRAME) -> List[Candle]:
+    _, sma = effective_params(rs, tf)    # same timeframe as evaluate()/status() so the fallback matches
+    return adapter.fetch_candles(symbol, "D1", sma + 10) or []
 
 
-def fetch_bars(adapter, symbol: str, tf: str) -> List[Candle]:
+def fetch_bars(adapter, symbol: str, tf: str, rs=None) -> List[Candle]:
     tf, cfg = variant(tf)
-    return adapter.fetch_candles(symbol, tf, cfg["candles"]) or []
+    channel, _ = effective_params(rs, tf)
+    return adapter.fetch_candles(symbol, tf, channel + WARMUP_BARS) or []

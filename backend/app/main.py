@@ -179,9 +179,12 @@ async def websocket_market_endpoint(
                 
                 from app.services import donchian_trend
                 from app.services.trade_manager import trade_manager as _tm
-                if getattr(_tm.risk_settings, "strategy_profile", "") == donchian_trend.STRATEGY_PROFILE:
+                from app.services import portfolio_trend
+                if portfolio_trend.is_active(_tm.risk_settings):
+                    report = portfolio_trend.primary_report(portfolio_trend.evaluate_all(mt5_adapter, symbol, _tm.risk_settings, ticker))
+                elif getattr(_tm.risk_settings, "strategy_profile", "") == donchian_trend.STRATEGY_PROFILE:
                     _dtf = donchian_trend.active_timeframe(_tm.risk_settings)
-                    report = donchian_trend.evaluate(symbol, donchian_trend.fetch_bars(mt5_adapter, symbol, _dtf), ticker, tf=_dtf, daily=donchian_trend.fetch_daily(mt5_adapter, symbol))
+                    report = donchian_trend.evaluate(symbol, donchian_trend.fetch_bars(mt5_adapter, symbol, _dtf, rs=_tm.risk_settings), ticker, tf=_dtf, rs=_tm.risk_settings, daily=donchian_trend.fetch_daily(mt5_adapter, symbol, rs=_tm.risk_settings, tf=_dtf))
                 else:
                     report = decision_engine.evaluate_trade_opportunity(symbol, candles, ticker, timeframe, htf_candles=htf_candles)
                 
