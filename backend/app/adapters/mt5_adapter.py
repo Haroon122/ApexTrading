@@ -474,7 +474,8 @@ class MT5Adapter:
 
 
     def place_order(
-        self, symbol: str, side: TradeSide, lots: float, sl: float, tp: float, reasoning: List[str] = None, ai_confidence: float = 0.80
+        self, symbol: str, side: TradeSide, lots: float, sl: float, tp: float, reasoning: List[str] = None, ai_confidence: float = 0.80,
+        comment: Optional[str] = None
     ) -> Tuple[bool, Optional[TradeRecord], str]:
         if self.session_manager.use_live_mt5 and MT5_AVAILABLE:
             try:
@@ -513,7 +514,7 @@ class MT5Adapter:
                     "tp": tp_val,
                     "deviation": 20,
                     "magic": 998877,
-                    "comment": "ApexTrader AI Order",
+                    "comment": (comment or "ApexTrader AI Order")[:31],
                     "type_time": mt5.ORDER_TIME_GTC,
                     "type_filling": filling_type,
                 }
@@ -955,6 +956,14 @@ class MT5Adapter:
                         cached_t = trade_manager.active_trades.get(str(p.ticket))
                         setup_str = cached_t.setup_name if (cached_t and cached_t.setup_name) else "Unknown"
                         tf_str = cached_t.timeframe if (cached_t and cached_t.timeframe) else "M15"
+                        if setup_str == "Unknown":
+                            # After a restart the in-memory cache is empty: recover the portfolio strategy
+                            # from the order comment tag that was written when the trade was opened.
+                            from app.services import portfolio_trend
+                            tagged = portfolio_trend.setup_for_tag(getattr(p, "comment", ""))
+                            if tagged:
+                                setup_str = tagged
+                                tf_str = portfolio_trend.timeframe_from_setup(tagged) or tf_str
 
                         pot_loss = calculate_potential_pnl_usd(p.symbol, side_val, p.price_open, p.sl, p.volume) if p.sl > 0 else 0.0
                         pot_profit = calculate_potential_pnl_usd(p.symbol, side_val, p.price_open, p.tp, p.volume) if p.tp > 0 else 0.0

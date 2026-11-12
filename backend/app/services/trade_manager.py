@@ -40,6 +40,9 @@ class TradeManager:
         self.risk_settings: RiskSettings = self._load_persisted_risk_settings()
         self.pending_confirmation: Optional[Dict[str, Any]] = None
         self.executed_signals: Dict[str, datetime] = {}
+        # PORTFOLIO_TREND: strategy key -> open time of the signal candle already acted on, so the same
+        # closed candle never opens a second trade (even if the first one was stopped out meanwhile).
+        self.portfolio_signals: Dict[str, Any] = {}
         self.training_active: bool = False
         self.backtest_active: bool = False
         self._load_recent_signals()
@@ -175,7 +178,9 @@ class TradeManager:
             return res, msg
 
         cooldown_sec = int(getattr(self.risk_settings, "auto_trade_cooldown_seconds", 300))
-        if cooldown_sec > 0 and self.last_auto_trade_time is not None:
+        from app.services import portfolio_trend
+        # Portfolio mode: strategies may signal on the same candle close; no global entry cooldown.
+        if cooldown_sec > 0 and self.last_auto_trade_time is not None and not portfolio_trend.is_active(self.risk_settings):
             elapsed = (datetime.now() - self.last_auto_trade_time).total_seconds()
             if elapsed < cooldown_sec:
                 remaining = int(cooldown_sec - elapsed)
@@ -332,17 +337,22 @@ class TradeManager:
                     "message": f"Trade Blocked: {can_msg}"
                 }
 
+        # 3-portfolio. Donchian H1 + Supertrend H4 + Pullback H4 (each evaluated and risk-checked on its own)
+        from app.services import portfolio_trend
+        if portfolio_trend.is_active(self.risk_settings):
+            return self._portfolio_pipeline(symbol, force_execution)
+
         # 3a. Backtested Donchian Trend strategy (bypasses the legacy multi-setup engine)
         from app.services import donchian_trend
         if getattr(self.risk_settings, "strategy_profile", "") == donchian_trend.STRATEGY_PROFILE:
             from app.services.symbol_specs import get_symbol_specs
             d_tf = donchian_trend.active_timeframe(self.risk_settings)
-            h1 = donchian_trend.fetch_bars(mt5_adapter, symbol, d_tf)
+            h1 = donchian_trend.fetch_bars(mt5_adapter, symbol, d_tf, rs=self.risk_settings)
             ticker = mt5_adapter.get_ticker(symbol)
             pip = float(get_symbol_specs(symbol).get("pip_size", 0.10) or 0.10)
             max_spread = float(getattr(self.risk_settings, "max_spread_pips", 3.0) or 0) * pip or None
-            report = donchian_trend.evaluate(symbol, h1, ticker, max_spread, tf=d_tf,
-                                            daily=donchian_trend.fetch_daily(mt5_adapter, symbol))
+            report = donchian_trend.evaluate(symbol, h1, ticker, max_spread, tf=d_tf, rs=self.risk_settings,
+                                            daily=donchian_trend.fetch_daily(mt5_adapter, symbol, rs=self.risk_settings, tf=d_tf))
             # High-impact USD news blackout (30 min before/after) blocks NEW entries only.
             if report.decision != TradeSide.HOLD and getattr(self.risk_settings, "news_filter_enabled", True):
                 from app.services.news_filter import news_filter
@@ -478,6 +488,157 @@ class TradeManager:
             "report": report
         }
 
+    # ── PORTFOLIO_TREND PIPELINE (Donchian H1 + Supertrend H4 + Pullback H4) ──────────────
+
+    def _open_strategy_positions(self, symbol: str) -> List[Any]:
+        """Open positions for the symbol from the broker, plus locally tracked ones (paper mode)."""
+        seen, out = set(), []
+        for p in list(mt5_adapter.get_positions() or []) + list(self.active_trades.values()):
+            if p.symbol != symbol or getattr(p, "state", TradeState.OPEN) != TradeState.OPEN:
+                continue
+            if str(p.trade_id) in seen:
+                continue
+            seen.add(str(p.trade_id))
+            out.append(p)
+        return out
+
+    def _portfolio_pipeline(self, symbol: str, force_execution: bool = False) -> Dict[str, Any]:
+        """Evaluate every enabled portfolio strategy independently. Each one: own timeframe, own signal,
+        own stop/exit, at most one open trade, and the normal risk checks. Returns the same result dict
+        shape as the single-strategy pipeline (the first executed trade wins the report)."""
+        from app.services import portfolio_trend as pt
+        from app.services.risk_manager import risk_manager
+        from app.services.symbol_specs import get_symbol_specs
+
+        rs = self.risk_settings
+        keys = pt.enabled_keys(rs)
+        if not keys:
+            return {"success": False, "stage": "STRATEGY_HOLD",
+                    "reason": "Trade Held: no portfolio strategy is enabled in Risk Settings.",
+                    "message": "No portfolio strategy enabled.", "report": None}
+
+        account = mt5_adapter.get_account_info()
+        ticker = mt5_adapter.get_ticker(symbol)
+        pip = float(get_symbol_specs(symbol).get("pip_size", 0.10) or 0.10)
+        max_spread = float(getattr(rs, "max_spread_pips", 3.0) or 0) * pip or None
+
+        news_msg = None
+        if getattr(rs, "news_filter_enabled", True):
+            from app.services.news_filter import news_filter
+            blocked, msg = news_filter.is_news_blackout(symbol)
+            if blocked:
+                news_msg = msg
+
+        open_pos = self._open_strategy_positions(symbol)
+        executed: List[Tuple[Any, Any, str]] = []
+        blocked_results: List[Dict[str, Any]] = []
+        summaries: List[str] = []
+        first_report = None
+
+        for key in keys:
+            label = f"{pt.LABELS[key]} {pt.tf_of(key, rs)}"
+            bars = pt.fetch_bars(mt5_adapter, symbol, key, rs=rs)
+            daily = pt.fetch_daily(mt5_adapter, symbol, key, rs=rs)
+            report = pt.evaluate(key, symbol, bars, daily, ticker, max_spread, rs=rs)
+            if first_report is None:
+                first_report = report
+            if report.decision == TradeSide.HOLD:
+                detail = report.summary_explanation or (report.rejection_reasons[1] if len(report.rejection_reasons) > 1 else "no signal")
+                summaries.append(f"{label}: {detail}")
+                continue
+
+            ts = report.signal_candle_ts
+            tf = pt.tf_of(key, rs)
+
+            def _hold(why: str, code: str, report=report, label=label):
+                report.decision = TradeSide.HOLD
+                report.setup_name = "None"
+                report.rejection_reasons = [code, why]
+                report.reasoning.append(why)
+                report.summary_explanation = why
+                summaries.append(f"{label}: {why}")
+
+            if any(pt.strategy_of(getattr(p, "setup_name", "")) == key for p in open_pos):
+                _hold("signal ignored: this strategy already has an open trade", "POSITION_ACTIVE")
+                continue
+            if ts is not None and self.portfolio_signals.get(key) == ts:
+                _hold("signal ignored: this candle was already traded", "ALREADY_TRADED")
+                continue
+            age = pt.signal_age_minutes(bars, tf, ticker)
+            if age is not None and age > pt.max_signal_age_minutes(tf):
+                _hold(f"signal expired: {age:.0f} min after the {tf} candle closed (max {pt.max_signal_age_minutes(tf):.0f})", "SIGNAL_EXPIRED")
+                continue
+            if news_msg:
+                _hold(f"skipped: {news_msg}", "NEWS_BLOCKED")
+                continue
+
+            risk_check = risk_manager.evaluate_risk(account, report, symbol)
+            if not risk_check.passed:
+                first_risk = risk_check.reasons[0] if risk_check.reasons else "Risk Management Rejected Order"
+                blocked_results.append({
+                    "success": False, "stage": "RISK_REJECTED",
+                    "reason": f"{label} blocked by Risk Guard: {first_risk}",
+                    "message": f"Risk Management Rejected Order: {first_risk}",
+                    "risk_reasons": risk_check.reasons, "report": report})
+                summaries.append(f"{label}: signal blocked by risk guard ({first_risk})")
+                continue
+
+            success, trade, exec_msg = self.execute_decision(report, risk_check.calculated_lots, force_execution=force_execution)
+            if success:
+                if ts is not None:
+                    self.portfolio_signals[key] = ts
+                open_pos.append(trade)
+                executed.append((report, trade, exec_msg))
+                logger.info(f"[PORTFOLIO] {label} executed: {exec_msg}")
+            else:
+                blocked_results.append({
+                    "success": False, "stage": "EXECUTION_FAILED",
+                    "reason": f"AI Execution Blocked ({label}): {exec_msg}", "message": exec_msg, "report": report})
+                summaries.append(f"{label}: execution failed ({exec_msg})")
+
+        if executed:
+            rep, trade, _ = executed[0]
+            msg = " | ".join(m for _, _, m in executed)
+            return {"success": True, "stage": "EXECUTED", "reason": f"Trade Executed Successfully: {msg}",
+                    "message": msg, "trade": trade, "report": rep}
+        if blocked_results:
+            return blocked_results[0]
+        return {"success": False, "stage": "STRATEGY_HOLD", "reason": "Trade Held: " + " | ".join(summaries),
+                "message": "No trade executed. " + " | ".join(summaries), "report": first_report}
+
+    def _manage_portfolio_position(self, trade_id: str, trade: TradeRecord, is_buy: bool, eval_price: float,
+                                   pip_size: float, digits: int, cache: Dict[str, list]) -> None:
+        """Exit management for one PORTFOLIO_TREND trade: chandelier trail (Donchian, Pullback) or
+        close-on-Supertrend-flip (Supertrend). Legacy break-even / giveback / M1 trailing are not used."""
+        from app.services import portfolio_trend as pt
+        key = pt.strategy_of(trade.setup_name)
+        if key is None:
+            return  # manual / legacy trade: leave it alone
+        # Manage on the timeframe the trade was opened on, even if the setting was changed afterwards.
+        tf = pt.trade_timeframe(key, trade, self.risk_settings)
+        ck = f"{key}:{tf}"
+        if ck not in cache:
+            cache[ck] = mt5_adapter.fetch_candles(trade.symbol, tf, pt.manage_fetch_count(key)) or []
+        action = pt.manage_action(key, cache[ck], is_buy, trade.sl_price, tf)
+        if not action:
+            return
+        kind, value = action
+        if kind == "TRAIL":
+            new_sl = round(value, digits)
+            valid = new_sl < eval_price if is_buy else new_sl > eval_price   # never on the wrong side of price
+            if valid and abs(new_sl - trade.sl_price) > 1.5 * pip_size:
+                if mt5_adapter.update_sl_tp(trade_id, new_sl=new_sl, new_tp=trade.tp_price):
+                    logger.info(f"[PORTFOLIO TRAIL] {key} {trade_id} SL {trade.sl_price} -> {new_sl}")
+                    trade.sl_price = new_sl
+        elif kind == "CLOSE":
+            ok, msg = mt5_adapter.close_order(trade_id, exit_reason=str(value)[:20])
+            if ok:
+                trade.state = TradeState.CLOSED
+                self.active_trades.pop(trade_id, None)
+                logger.info(f"[PORTFOLIO EXIT] {key} {trade_id} closed: {value}")
+            else:
+                logger.warning(f"[PORTFOLIO EXIT] {key} {trade_id} close failed ({value}): {msg}")
+
     def execute_decision(self, report: TradeDecisionReport, lots: float, force_execution: bool = False) -> Tuple[bool, Optional[TradeRecord], str]:
         logger.info(f"[EXECUTE DECISION] execute_decision reached: symbol={report.symbol}, decision={report.decision.value}, lots={lots}, force_execution={force_execution}")
         
@@ -521,6 +682,11 @@ class TradeManager:
         candle_ts = candles[-1].timestamp.strftime("%Y-%m-%d %H:%M") if candles else datetime.now().strftime("%Y-%m-%d %H:%M")
         
         signal_id = f"{account_id}_{symbol}_{timeframe}_{candle_ts}_{direction}"
+        from app.services import portfolio_trend
+        order_tag = portfolio_trend.tag_for_setup(report.setup_name)
+        if order_tag:
+            # Two portfolio strategies share a timeframe/direction/candle: they must not block each other.
+            signal_id += f"_{order_tag}"
 
         if not force_execution and mode != "PAPER_MODE":
             if signal_id in self.executed_signals:
@@ -561,6 +727,7 @@ class TradeManager:
 
         # ── LIVE broker order placement ──
         logger.info(f"[EXECUTE DECISION] Calling mt5_adapter.place_order for symbol={report.symbol}, side={report.decision.value}, lots={lots}")
+        order_kwargs = {"comment": order_tag} if order_tag else {}
         success, trade, msg = mt5_adapter.place_order(
             symbol=report.symbol,
             side=report.decision,
@@ -568,7 +735,8 @@ class TradeManager:
             sl=report.suggested_sl,
             tp=report.suggested_tp,
             reasoning=report.reasoning,
-            ai_confidence=report.confidence
+            ai_confidence=report.confidence,
+            **order_kwargs
         )
 
         if success and trade:
@@ -890,6 +1058,7 @@ class TradeManager:
 
         # 2. Apply trailing stop / break-even check for currently active positions
         donchian_h1 = None  # fetched lazily, once per cycle
+        portfolio_candles: Dict[str, list] = {}  # PORTFOLIO_TREND: strategy key -> candles, once per cycle
         for trade_id, trade in list(self.active_trades.items()):
             if trade.symbol != symbol or trade.state != TradeState.OPEN:
                 continue
@@ -929,6 +1098,11 @@ class TradeManager:
             # ── PEAK PROFIT RR TRACKING (no look-ahead — uses only current price) ──
             if profit_rr > trade.peak_profit_rr:
                 trade.peak_profit_rr = profit_rr
+
+            from app.services import portfolio_trend
+            if portfolio_trend.is_active(self.risk_settings):
+                self._manage_portfolio_position(trade_id, trade, is_buy, eval_price, pip_size, digits, portfolio_candles)
+                continue
 
             # Donchian Trend mode: only the backtested H1 chandelier trailing stop.
             # Giveback guard / break-even / M1-ATR trailing are skipped because they

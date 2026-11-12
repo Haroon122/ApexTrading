@@ -1929,3 +1929,27 @@ select option:checked {
 .dt-trend strong { font-family: var(--font-mono); }
 .dt-trend strong.up { color: var(--accent-emerald); }
 .dt-trend strong.down { color: var(--accent-red); }
+
+
+/* ── Portfolio strategy panel ── */
+.pf-panel { border-top: 1px solid var(--border); background: var(--bg-surface); }
+.pf-panel.hidden, .dt-panel.hidden, #cfg-portfolio-box.hidden { display: none; }
+.pf-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 14px; font-size: 12px; border-bottom: 1px solid var(--border); }
+.pf-head strong i { color: var(--accent-cyan); margin-right: 4px; }
+.pf-news { margin-left: auto; font-size: 11px; color: var(--text-secondary); }
+.pf-news strong.down { color: var(--accent-red); }
+.pf-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--border); }
+@media (max-width: 1200px) { .pf-cards { grid-template-columns: 1fr; } }
+.pf-card { background: var(--bg-surface); padding: 8px 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.pf-card.pf-off { opacity: 0.45; }
+.pf-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.pf-card-head h4 { margin: 0; font-size: 12px; font-weight: 700; }
+.pf-card-head h4 small { font-weight: 500; color: var(--text-muted); margin-left: 4px; }
+.pf-headline { font-size: 12px; font-weight: 700; }
+.pf-headline.up { color: var(--accent-emerald); }
+.pf-headline.down { color: var(--accent-red); }
+.pf-card .dt-stats { grid-template-columns: repeat(2, 1fr); }
+.pf-card .dt-stats .dt-wide { grid-column: span 2; }
+.pf-card .dt-positions { max-height: 110px; }
+
+.pf-tf-label { display: block; margin-top: 8px; font-size: 11px; color: var(--text-secondary); }

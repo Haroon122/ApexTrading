@@ -14,7 +14,7 @@
         rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 
-    <link rel="stylesheet" href="styles.css?v=20261102a">
+    <link rel="stylesheet" href="styles.css?v=20261111a">
 </head>
 
 <body class="dark-theme">
@@ -385,8 +385,7 @@
                     <div class="price-display">
                         <span class="lbl">BID:</span> <strong id="price-bid">1.08520</strong>
                         <span class="lbl">ASK:</span> <strong id="price-ask">1.08532</strong>
-                        <span class="lbl">SPREAD:</span> <span class="badge-spread" id="price-spread">1.2 Pips</span>
-                    </div>
+                        <span class="lbl">SPREAD:</span> <span class="badge-spread" id="price-spread">1.2 Pips</span>                    </div>
                 </div>
 
                 <!-- TradingView-Style Drawing Toolbar -->
@@ -418,6 +417,12 @@
                     <button class="btn-chart-tool active" id="toggle-ob"
                         title="Toggle Smart Money Order Blocks & Fair Value Gaps"><i
                             class="fa-solid fa-boxes-stacked"></i> Order Blocks</button>
+                    <button class="btn-chart-tool active" id="toggle-sr"
+                        title="Automatic support (green) and resistance (red) levels. Click to cycle: Nearby 2+2 (closest 2 above and 2 below price) / All / Off. Label: timeframe and number of touches."><i
+                            class="fa-solid fa-ruler-horizontal"></i> S/R</button>
+                    <button class="btn-chart-tool active" id="toggle-donchian"
+                        title="Donchian channel (shown when the Donchian Trend strategy is active)"><i
+                            class="fa-solid fa-arrows-up-down"></i> Donchian</button>
                     <button class="btn-chart-tool active" id="toggle-rsi"
                         title="Toggle Relative Strength Index (RSI) subchart"><i class="fa-solid fa-chart-bar"></i> RSI
                         Subchart</button>
@@ -458,6 +463,19 @@
                         <p class="explanation-summary" id="ai-explanation-summary">Analyzing live market structure,
                             higher timeframe trends, and technical indicators...</p>
                         <div class="explanation-chips" id="ai-outweighing-chips"></div>
+                    </div>
+                </div>
+
+                <!-- Portfolio strategy panel (Donchian H1 + Supertrend H4 + Pullback H4) -->
+                <div class="pf-panel hidden" id="pf-panel">
+                    <div class="pf-head">
+                        <strong><i class="fa-solid fa-layer-group"></i> Strategy Portfolio</strong>
+                        <span class="dt-chip" id="pf-open-chip">0 OPEN</span>
+                        <span class="dt-chip" id="pf-risk-chip">risk --</span>
+                        <span class="pf-news" id="pf-news">News: --</span>
+                    </div>
+                    <div class="pf-cards" id="pf-cards">
+                        <p class="dt-note" style="padding:8px 14px;">Loading strategy status...</p>
                     </div>
                 </div>
 
@@ -927,7 +945,7 @@
                     <div class="grid-2col margin-top-sm">
                         <div class="control-group" data-risk-field="cfg-strategy-profile">
                             <label>Trading Strategy</label>
-                            <select id="cfg-strategy-profile" class="form-control"><option value="DONCHIAN_TREND">DONCHIAN TREND (backtested 2015-2026, recommended)</option><option value="HYBRID_AUTO">LEGACY MULTI-SETUP (not recommended, lost money)</option></select>
+                            <select id="cfg-strategy-profile" class="form-control"><option value="PORTFOLIO_TREND">PORTFOLIO: Donchian H1 + Supertrend H4 + Pullback H4 (backtested 2016-2026, recommended)</option><option value="DONCHIAN_TREND">DONCHIAN TREND only (H1 or M15)</option><option value="HYBRID_AUTO">LEGACY MULTI-SETUP (not recommended, lost money)</option></select>
                         </div>
                         <div class="control-group" data-risk-field="cfg-donchian-tf">
                             <label>Trading Timeframe (one at a time)</label>
@@ -935,9 +953,62 @@
                             <small class="text-muted">Cannot be changed while a gold trade is open.</small>
                         </div>
                     </div>
+                    <div id="cfg-portfolio-box" class="hidden">
+                        <div class="grid-2col margin-top-sm">
+                            <div class="control-group" data-risk-field="cfg-pf-donchian">
+                                <label>Donchian Trend &mdash; H1 breakout</label>
+                                <select id="cfg-pf-donchian" class="form-control"><option value="true">ON</option><option value="false">OFF</option></select>
+                                <label class="pf-tf-label">Timeframe</label>
+                                <select id="cfg-pf-donchian-tf" class="form-control"><option value="H1">H1 &mdash; safer (tested 2016-2026)</option><option value="M15">M15 &mdash; more trades, bigger drawdown, spread-sensitive</option></select>
+                                <small class="text-muted">Channel breakout with the daily trend. Stop 3&times;ATR, trailing stop 4&times;ATR.</small>
+                            </div>
+                            <div class="control-group" data-risk-field="cfg-pf-supertrend">
+                                <label>Supertrend + EMA200 &mdash; H4</label>
+                                <select id="cfg-pf-supertrend" class="form-control"><option value="true">ON</option><option value="false">OFF</option></select>
+                                <label class="pf-tf-label">Timeframe</label>
+                                <select id="cfg-pf-supertrend-tf" class="form-control"><option value="H4">H4 &mdash; best risk/return (PF 1.39, drawdown 9R)</option><option value="H1">H1 &mdash; more trades (PF 1.20, drawdown 32R)</option><option value="M15">M15 &mdash; many trades (PF 1.16, drawdown 84R)</option></select>
+                                <small class="text-muted">Supertrend flip in the direction of the EMA200 (H4: ST 10/2, H1 and M15: ST 14/3). Closes the trade when Supertrend flips back.</small>
+                            </div>
+                        </div>
+                        <div class="grid-2col margin-top-sm">
+                            <div class="control-group" data-risk-field="cfg-pf-pullback">
+                                <label>Trend Pullback (EMA20) &mdash; H4</label>
+                                <select id="cfg-pf-pullback" class="form-control"><option value="true">ON</option><option value="false">OFF</option></select>
+                                <label class="pf-tf-label">Timeframe</label>
+                                <select id="cfg-pf-pullback-tf" class="form-control"><option value="H4">H4 &mdash; best risk/return (PF 1.45, drawdown 13R)</option><option value="H1">H1 &mdash; more trades (PF 1.19, drawdown 34R)</option><option value="M15">M15 &mdash; many trades (PF 1.28, drawdown 59R, weak at 3x costs)</option></select>
+                                <small class="text-muted">In a daily trend, buy/sell the bounce off EMA20. H4: stop 2&times;ATR, trail 3&times;ATR. H1 and M15: stop 3&times;ATR, trail 4&times;ATR.</small>
+                            </div>
+                            <div class="control-group" data-risk-field="cfg-pf-risk">
+                                <label>Risk per strategy trade (% of equity)</label>
+                                <input type="number" id="cfg-pf-risk" class="form-control" min="0.1" max="2" step="0.1" value="0.5">
+                                <small class="text-muted">Used instead of &ldquo;Max risk per trade&rdquo; in portfolio mode. With all three open at 0.5% the most you can lose at once is 1.5%. Allowed 0.1&ndash;2.0.</small>
+                            </div>
+                        </div>
+                        <div class="text-muted" style="font-size:12px;margin-top:6px;line-height:1.5;">
+                            Each strategy has at most one open trade and uses its own timeframe and exit. Opposite-direction trades are never opened together.
+                            Each strategy runs on the timeframe you pick; the parameters change with it to the ones that tested best there.
+                            Backtest 2016-2026 (spread, slippage and swap included) with Donchian H1 + Supertrend H4 + Pullback H4: ~96 trades/yr, PF 1.40, +185R, max drawdown 41R
+                            (Donchian alone: ~35 trades/yr, PF 1.37, +67R, 27R). <b>H1 / M15 give more trades but a larger drawdown and thinner margins after costs</b>
+                            (M15 data covers only Aug 2022 on). An open trade is always managed on the timeframe it was opened on.
+                            Set <b>Max Open Positions</b> to at least the number of strategies ON.
+                        </div>
+                    </div>
+                    <div class="grid-2col margin-top-sm">
+                        <div class="control-group" data-risk-field="cfg-donchian-hours">
+                            <label>Breakout Lookback (hours)</label>
+                            <input type="number" id="cfg-donchian-hours" class="form-control" min="40" max="200" step="1" value="100">
+                            <small class="text-muted" id="cfg-donchian-hours-hint">Safe range 40&ndash;200 (M15: 50&ndash;200). H1 = 1 candle per hour, M15 = 4. Default 100 (&asymp; 4 days).</small>
+                        </div>
+                        <div class="control-group" data-risk-field="cfg-donchian-sma">
+                            <label>Daily Trend Average (days)</label>
+                            <input type="number" id="cfg-donchian-sma" class="form-control" min="50" max="250" step="1" value="200">
+                            <small class="text-muted">Safe range 50&ndash;250. Default 200. Weak combinations (e.g. a fast average with a short lookback) and anything outside the backtested range are refused when saving.</small>
+                        </div>
+                    </div>
                     <div id="cfg-strategy-info" class="text-muted" style="font-size:12px;margin-top:6px;line-height:1.5;">
-                        Candle closes beyond the channel high/low (H1: 100 candles, M15: 400 candles) &rarr; trade in that direction,
-                        only with the daily trend (200-day average). Stop = 3&times;ATR, trailing stop = 4&times;ATR, no fixed TP.<br>
+                        Candle closes beyond the channel high/low of the lookback above (default: H1 100 candles, M15 400 candles) &rarr; trade in that direction,
+                        only with the daily trend (average above). Stop = 3&times;ATR, trailing stop = 4&times;ATR, no fixed TP.<br>
+                        Backtested alternative (2016-2026): <b>40 hours + 100 days</b> gave ~53 trades/yr, PF 1.38, 24R max drawdown vs <b>100 + 200</b> (default): ~35 trades/yr, PF 1.50, 27R.<br>
                         Backtest 2015-2026: <b>H1</b> ~32 trades/yr, +82R, max drawdown 27R &middot; <b>M15</b> ~62 trades/yr, +132R, max drawdown 40R.
                     </div>
                     <h4 style="margin:16px 0 4px;font-size:13px;color:var(--accent-cyan);text-transform:uppercase;letter-spacing:.05em;">2. Position Size</h4>
@@ -1519,7 +1590,8 @@
         </div>
     </div>
 
-    <script src="app.js?v=20261102a"></script>
+    <script src="vendor/lightweight-charts.standalone.production.js"></script>
+    <script src="app.js?v=20261111a"></script>
 </body>
 
 </html>

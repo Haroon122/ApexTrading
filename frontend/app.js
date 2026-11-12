@@ -56,6 +56,7 @@ const state = {
     showVWAP:      true,
     showBollinger: true,
     showOB:        true,
+    srMode:        "nearby",
     showRSI:       true,
     showMACD:      true,
   },
@@ -199,13 +200,14 @@ async function setTimeframe(tf) {
 
   // 3. Render chart background immediately
   renderFinancialChart();
+  if (typeof refreshSupportResistance === "function") refreshSupportResistance();
 
   // 4. Reconnect WebSocket engine for target timeframe
   resetSLTPInputs();
   connectWebSocket();
 
   // 5. Fetch historical candles for target timeframe via REST API immediately
-  const candles = await apiFetch(`/api/v1/market/candles?symbol=${state.symbol}&timeframe=${target}&count=100`);
+  const candles = await apiFetch(`/api/v1/market/candles?symbol=${state.symbol}&timeframe=${target}&count=${CHART_HISTORY}`);
   if (candles && candles.length > 0) {
     state.candles = candles;
     renderFinancialChart();
@@ -214,6 +216,10 @@ async function setTimeframe(tf) {
 
   // 6. Sync the bot's entry timeframe with the chart, except in Donchian Trend
   //    mode where entries always use H1 (the chart is only for viewing).
+  if (isPortfolioMode()) {
+    if (el("auto-trade-live-tf-badge")) el("auto-trade-live-tf-badge").textContent = `RUNNING (${portfolioTimeframes(state.riskSettings)})`;
+    return;
+  }
   if (state.riskSettings && state.riskSettings.strategy_profile === "DONCHIAN_TREND") {
     if (el("auto-trade-live-tf-badge")) el("auto-trade-live-tf-badge").textContent = `RUNNING (${state.riskSettings.donchian_timeframe || "H1"})`;
     return;
@@ -285,6 +291,9 @@ function connectWebSocket() {
   };
 }
 
+// Candles kept/fetched for the chart (backend allows up to 1000).
+const CHART_HISTORY = 1000;
+
 // Merge incoming candles into the chart instead of replacing the list.
 // Sources send different counts (WebSocket 50, sync 80, timeframe switch 100) and
 // replacing made the visible candle count, and so the candle width, jump every few
@@ -298,7 +307,7 @@ function mergeChartCandles(incoming) {
   incoming.forEach(c => byTs.set(c.timestamp, c));
   state.candles = [...byTs.values()]
     .sort((a, b) => (a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0))
-    .slice(-300);
+    .slice(-CHART_HISTORY);
   return true;
 }
 
@@ -581,8 +590,17 @@ function updateRiskSettingsUI(cfg, forceModalUpdate = true) {
   const modalVisible = el("modal-settings") && !el("modal-settings").classList.contains("hidden");
   if (el("cfg-max-risk") && (forceModalUpdate || !modalVisible)) {
     const setVal = (id, v) => { if (el(id)) el(id).value = v; };
-    setVal("cfg-strategy-profile", cfg.strategy_profile === "DONCHIAN_TREND" ? "DONCHIAN_TREND" : "HYBRID_AUTO");
+    setVal("cfg-strategy-profile", ["PORTFOLIO_TREND", "DONCHIAN_TREND"].includes(cfg.strategy_profile) ? cfg.strategy_profile : "HYBRID_AUTO");
+    setVal("cfg-pf-donchian", String(cfg.portfolio_donchian_enabled !== false));
+    setVal("cfg-pf-supertrend", String(cfg.portfolio_supertrend_enabled !== false));
+    setVal("cfg-pf-pullback", String(cfg.portfolio_pullback_enabled !== false));
+    setVal("cfg-pf-risk", cfg.portfolio_risk_per_strategy_pct ?? 0.5);
+    setVal("cfg-pf-donchian-tf", (cfg.portfolio_donchian_tf || "H1").toUpperCase());
+    setVal("cfg-pf-supertrend-tf", (cfg.portfolio_supertrend_tf || "H4").toUpperCase());
+    setVal("cfg-pf-pullback-tf", (cfg.portfolio_pullback_tf || "H4").toUpperCase());
     setVal("cfg-donchian-tf", (cfg.donchian_timeframe || "H1").toUpperCase() === "M15" ? "M15" : "H1");
+    setVal("cfg-donchian-hours", cfg.donchian_channel_hours ?? 100);
+    setVal("cfg-donchian-sma", cfg.donchian_trend_sma ?? 200);
     setVal("cfg-news-filter", String(cfg.news_filter_enabled !== false));
     setVal("cfg-lot-mode", cfg.lot_sizing_mode ?? "DYNAMIC_RISK");
     setVal("cfg-max-risk", cfg.max_risk_per_trade_pct ?? 1.0);
@@ -600,13 +618,17 @@ function updateRiskSettingsUI(cfg, forceModalUpdate = true) {
     setVal("cfg-blocked-hours", (cfg.blocked_hours || []).join(","));
     setVal("cfg-auto-trade-enabled", String(cfg.auto_trade_enabled === true));
     setVal("cfg-enable-live-trading", String(cfg.enable_live_trading === true));
+    syncStrategyForm();
   }
+  applyStrategyPanels();
 
   // Update Live Risk Monitor Sidebar Card Badges
   if (el("risk-strategy-badge")) {
+    const isPf = cfg.strategy_profile === "PORTFOLIO_TREND";
     const isDon = cfg.strategy_profile === "DONCHIAN_TREND";
-    el("risk-strategy-badge").textContent = isDon ? `DONCHIAN TREND (${cfg.donchian_timeframe || "H1"})` : "LEGACY MULTI-SETUP";
-    el("risk-strategy-badge").className = isDon ? "text-emerald" : "text-amber";
+    const nOn = [cfg.portfolio_donchian_enabled, cfg.portfolio_supertrend_enabled, cfg.portfolio_pullback_enabled].filter(v => v !== false).length;
+    el("risk-strategy-badge").textContent = isPf ? `PORTFOLIO (${nOn} strategies)` : isDon ? `DONCHIAN TREND (${cfg.donchian_timeframe || "H1"})` : "LEGACY MULTI-SETUP";
+    el("risk-strategy-badge").className = (isPf || isDon) ? "text-emerald" : "text-amber";
   }
   if (el("risk-consec-badge")) {
     const n = cfg.max_consecutive_losses ?? 0;
@@ -1079,344 +1101,491 @@ async function loadLoginHistory() {
 // ─────────────────────────────────────────────────────────────
 //  FINANCIAL CANVAS CHART ENGINE WITH INDICATORS & DRAWING TOOLS
 // ─────────────────────────────────────────────────────────────
-function renderFinancialChart() {
-  const canvas = el("financialChartCanvas");
-  if (!canvas) return;
+// ─────────────────────────────────────────────────────────────
+//  TRADINGVIEW LIGHTWEIGHT CHART  (replaces the old hand-drawn canvas)
+//  Holder: #canvas-holder (size unchanged). Library: vendor/lightweight-charts
+// ─────────────────────────────────────────────────────────────
+const TV = {
+  chart: null, host: null, legend: null,
+  candle: null, volume: null,
+  ema20: null, ema50: null, ema200: null, vwap: null, bbU: null, bbL: null,
+  donU: null, donL: null,
+  rsi: null, macdHist: null, macdLine: null, macdSig: null,
+  tradeLines: [], tradeSig: "",
+  srLines: [], srSig: "",
+  drawLines: [], drawSeries: [],
+  baseKey: "", lastLen: 0, layoutSig: "", markerSig: "",
+  shade: null, numByTime: new Map(), tradeMarkers: [], chanMarkers: [], lastNum: null,
+};
 
-  const holder = canvas.parentElement;
-  canvas.width  = holder.clientWidth  || 800;
-  canvas.height = holder.clientHeight || 350;
-
-  const ctx = canvas.getContext("2d");
-  const W   = canvas.width;
-  const H   = canvas.height;
-
-  ctx.clearRect(0, 0, W, H);
-
-  // Background gradient
-  const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
-  bgGrad.addColorStop(0, "#080d14");
-  bgGrad.addColorStop(1, "#0a111a");
-  ctx.fillStyle = bgGrad;
-  ctx.fillRect(0, 0, W, H);
-
-  if (!state.candles || state.candles.length === 0) {
-    ctx.fillStyle = "#4a6080";
-    ctx.font = "12px JetBrains Mono, monospace";
-    ctx.textAlign = "center";
-    ctx.fillText(`[ Loading ${state.timeframe || "M15"} Market Data... ]`, W / 2, H / 2);
-    ctx.textAlign = "left";
-    return;
+// How many candles back the bot's breakout channel looks (0 = not applicable to this chart).
+// The window only maps onto candles when the chart timeframe equals the strategy timeframe.
+function tvChannelLen() {
+  const rs = state.riskSettings;
+  if (rs && rs.strategy_profile === "PORTFOLIO_TREND") {
+    // The portfolio's Donchian leg always trades H1.
+    const dtf = String(rs.portfolio_donchian_tf || "H1").toUpperCase();
+    if (rs.portfolio_donchian_enabled === false || String(state.timeframe || "").toUpperCase() !== dtf) return 0;
+    const st = state.dtStatus;
+    if (st && st.ok !== false && st.timeframe === dtf && st.channel_bars) return st.channel_bars;
+    const hrs = Number(rs.donchian_channel_hours) || 100;
+    return dtf === "M15" ? hrs * 4 : hrs;
   }
-
-  const total = state.candles.length;
-  const count = Math.min(total, Math.max(15, state.zoomCount));
-  const endIdx = Math.max(count, Math.min(total, total - state.panOffset));
-  const startIdx = Math.max(0, endIdx - count);
-  const visible = state.candles.slice(startIdx, endIdx);
-
-  if (visible.length === 0) return;
-
-  const hasRSI  = state.indicators.showRSI;
-  const hasMACD = state.indicators.showMACD;
-  const subchartCount = (hasRSI ? 1 : 0) + (hasMACD ? 1 : 0);
-  const subchartH     = subchartCount > 0 ? Math.min(75, (H * 0.2) / subchartCount) : 0;
-  const mainH         = H - (subchartH * subchartCount) - 30;
-
-  const highs = visible.map(c => c.high);
-  const lows  = visible.map(c => c.low);
-  const minP  = Math.min(...lows);
-  const maxP  = Math.max(...highs);
-  const rangeP = maxP - minP || 0.001;
-
-  const priceToY = (p) => mainH - ((p - minP) / rangeP) * (mainH - 40) - 20;
-
-  const gridLines = 6;
-  const digits = getDigits(state.symbol);
-
-  for (let i = 0; i <= gridLines; i++) {
-    const y = 20 + (i / gridLines) * (mainH - 40);
-    ctx.beginPath();
-    ctx.moveTo(60, y);
-    ctx.lineTo(W - 10, y);
-    ctx.strokeStyle = "rgba(255,255,255,0.04)";
-    ctx.lineWidth = 1;
-    ctx.stroke();
-
-    const price = maxP - (i / gridLines) * rangeP;
-    ctx.fillStyle = "#4a6080";
-    ctx.font = "10px JetBrains Mono, monospace";
-    ctx.fillText(price.toFixed(digits), 5, y + 4);
-  }
-
-  const gap     = (W - 75) / visible.length;
-  const candleW = Math.max(2, gap - 2);
-
-  // Candlesticks & Volume Bars
-  const maxVol = Math.max(...visible.map(c => c.volume)) || 1;
-  const volScale = (mainH * 0.15) / maxVol;
-
-  visible.forEach((c, i) => {
-    const x      = 60 + i * gap;
-    const isUp   = c.close >= c.open;
-    const color  = isUp ? "#00e5a0" : "#ff4d6d";
-    const body_h = Math.max(1, Math.abs(priceToY(c.open) - priceToY(c.close)));
-    const body_y = Math.min(priceToY(c.open), priceToY(c.close));
-    const cx     = x + gap / 2;
-
-    const volH = c.volume * volScale;
-    ctx.fillStyle = isUp ? "rgba(0,229,160,0.18)" : "rgba(255,77,109,0.18)";
-    ctx.fillRect(x + 1, mainH - volH, candleW - 2, volH);
-
-    ctx.beginPath();
-    ctx.moveTo(cx, priceToY(c.high));
-    ctx.lineTo(cx, priceToY(c.low));
-    ctx.strokeStyle = color;
-    ctx.lineWidth   = 1;
-    ctx.stroke();
-
-    ctx.fillStyle = isUp ? "rgba(0,229,160,0.85)" : "rgba(255,77,109,0.85)";
-    ctx.fillRect(x + 1, body_y, candleW - 2, body_h);
-  });
-
-  // Open Position Lines
-  state.positions.forEach(p => {
-    if (p.symbol === state.symbol) {
-      const y = priceToY(p.entry_price);
-      ctx.beginPath();
-      ctx.moveTo(60, y);
-      ctx.lineTo(W - 10, y);
-      ctx.strokeStyle = p.side === "BUY" ? "rgba(0,229,160,0.8)" : "rgba(255,77,109,0.8)";
-      ctx.lineWidth = 1.2;
-      ctx.setLineDash([6, 3]);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-  });
-
-  renderUserDrawings(ctx, mainH, minP, rangeP, W, visible, startIdx, gap, digits);
-
-  // Crosshair Overlay
-  if (state.mousePos && state.mousePos.x >= 60 && state.mousePos.x <= W - 15 && state.mousePos.y <= mainH) {
-    const mx = state.mousePos.x;
-    const my = state.mousePos.y;
-
-    ctx.beginPath();
-    ctx.moveTo(mx, 0); ctx.lineTo(mx, mainH);
-    ctx.moveTo(60, my); ctx.lineTo(W - 15, my);
-    ctx.strokeStyle = "rgba(0,209,255,0.5)";
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    const hoverP = maxP - ((my - 20) / (mainH - 40)) * rangeP;
-    ctx.fillStyle = "rgba(0,209,255,0.9)";
-    ctx.fillRect(5, my - 9, 52, 18);
-    ctx.fillStyle = "#000";
-    ctx.font = "10px JetBrains Mono, monospace";
-    ctx.fillText(hoverP.toFixed(digits), 8, my + 4);
-  }
+  if (!rs || rs.strategy_profile !== "DONCHIAN_TREND") return 0;
+  const stf = String(rs.donchian_timeframe || "H1").toUpperCase();
+  if (String(state.timeframe || "").toUpperCase() !== stf) return 0;
+  // Prefer the value the backend reports: it ignores invalid saved settings and trades the defaults.
+  const st = state.dtStatus;
+  if (st && st.ok !== false && st.timeframe === stf && st.channel_bars) return st.channel_bars;
+  const hours = Number(rs.donchian_channel_hours) || 100;   // H1: 1 candle/hour, M15: 4
+  return stf === "M15" ? hours * 4 : hours;
 }
 
-function renderUserDrawings(ctx, mainH, minP, rangeP, W, visible, startIdx, gap, digits) {
-  const priceToY = (p) => mainH - ((p - minP) / rangeP) * (mainH - 40) - 20;
-  const indexToX = (idx) => 60 + (idx - startIdx) * gap + gap / 2;
+function tvApplyMarkers() {
+  const all = [...TV.tradeMarkers, ...TV.chanMarkers].sort((a, b) => a.time - b.time);
+  const sig = JSON.stringify(all);
+  if (sig !== TV.markerSig) { TV.candle.setMarkers(all); TV.markerSig = sig; }
+}
 
-  const allDrawings = [...state.drawings];
-  if (state.drawingInProgress) {
-    allDrawings.push(state.drawingInProgress);
+function tvTime(ts) {
+  let s = String(ts);
+  if (!/[zZ]$|[+-]\d\d:?\d\d$/.test(s)) s += "Z";   // MT5 server time is read as UTC (matches the backend)
+  return Math.floor(Date.parse(s) / 1000);
+}
+
+function tvEma(vals, n) {
+  const k = 2 / (n + 1), out = [];
+  let prev = null;
+  vals.forEach((v, i) => {
+    if (i < n - 1) { out.push(null); return; }
+    prev = prev === null ? vals.slice(0, n).reduce((a, b) => a + b, 0) / n : v * k + prev * (1 - k);
+    out.push(prev);
+  });
+  return out;
+}
+
+function tvEnsureChart() {
+  if (TV.chart) return true;
+  const holder = el("canvas-holder");
+  const canvas = el("financialChartCanvas");
+  if (!holder || !window.LightweightCharts) return false;
+  if (canvas) canvas.style.display = "none";
+
+  TV.host = document.createElement("div");
+  TV.host.id = "tv-chart";
+  TV.host.style.cssText = "position:absolute;inset:4px;";
+  holder.appendChild(TV.host);
+
+  const LW = window.LightweightCharts;
+  TV.chart = LW.createChart(TV.host, {
+    autoSize: true,
+    layout: { background: { type: "solid", color: "#080d14" }, textColor: "#6f87a6", fontFamily: "JetBrains Mono, monospace", fontSize: 11 },
+    grid: { vertLines: { color: "rgba(255,255,255,0.035)" }, horzLines: { color: "rgba(255,255,255,0.035)" } },
+    crosshair: { mode: LW.CrosshairMode.Normal,
+      vertLine: { color: "rgba(0,209,255,0.5)", labelBackgroundColor: "#0b6e8a" },
+      horzLine: { color: "rgba(0,209,255,0.5)", labelBackgroundColor: "#0b6e8a" } },
+    rightPriceScale: { borderColor: "rgba(255,255,255,0.08)" },
+    timeScale: { borderColor: "rgba(255,255,255,0.08)", timeVisible: true, secondsVisible: false, rightOffset: 6 },
+    handleScroll: true, handleScale: true,
+  });
+
+  // Shaded band behind the candles = the bot's channel window (full-height, low-alpha bars)
+  TV.shade = TV.chart.addHistogramSeries({
+    priceScaleId: "shade", priceLineVisible: false, lastValueVisible: false,
+    autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 1 } }),
+  });
+  TV.chart.priceScale("shade").applyOptions({ scaleMargins: { top: 0, bottom: 0 }, visible: false });
+
+  TV.candle = TV.chart.addCandlestickSeries({
+    upColor: "#00e5a0", downColor: "#ff4d6d", borderVisible: false,
+    wickUpColor: "#00e5a0", wickDownColor: "#ff4d6d",
+  });
+  TV.volume = TV.chart.addHistogramSeries({ priceScaleId: "vol", priceFormat: { type: "volume" }, lastValueVisible: false, priceLineVisible: false });
+
+  const line = (color, extra = {}) => TV.chart.addLineSeries({ color, lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false, ...extra });
+  TV.bbU = line("rgba(0,209,255,0.55)");
+  TV.bbL = line("rgba(0,209,255,0.55)");
+  TV.ema20 = line("#00d1ff");
+  TV.ema50 = line("#fbbf24");
+  TV.ema200 = line("#a78bfa", { lineWidth: 2 });
+  TV.vwap = line("#f97316", { lineStyle: LW.LineStyle.Dotted });
+  TV.donU = line("#38bdf8", { lineWidth: 2 });
+  TV.donL = line("#f472b6", { lineWidth: 2 });
+
+  TV.rsi = TV.chart.addLineSeries({ priceScaleId: "rsi", color: "#a78bfa", lineWidth: 1, priceLineVisible: false, lastValueVisible: true });
+  TV.rsi.createPriceLine({ price: 70, color: "rgba(255,77,109,0.5)", lineWidth: 1, lineStyle: LW.LineStyle.Dashed, axisLabelVisible: false });
+  TV.rsi.createPriceLine({ price: 30, color: "rgba(0,229,160,0.5)", lineWidth: 1, lineStyle: LW.LineStyle.Dashed, axisLabelVisible: false });
+  TV.macdHist = TV.chart.addHistogramSeries({ priceScaleId: "macd", priceLineVisible: false, lastValueVisible: false });
+  TV.macdLine = TV.chart.addLineSeries({ priceScaleId: "macd", color: "#00d1ff", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+  TV.macdSig  = TV.chart.addLineSeries({ priceScaleId: "macd", color: "#fbbf24", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+
+  // OHLC legend (top-left)
+  TV.legend = document.createElement("div");
+  TV.legend.style.cssText = "position:absolute;top:6px;left:8px;z-index:5;font:11px JetBrains Mono,monospace;color:#8ba0bb;pointer-events:none;";
+  TV.host.appendChild(TV.legend);
+  TV.chart.subscribeCrosshairMove(param => {
+    const d = param && param.seriesData ? param.seriesData.get(TV.candle) : null;
+    const num = d && param.time !== undefined ? TV.numByTime.get(param.time) : TV.lastNum;
+    tvUpdateLegend(d || (state.candles.length ? tvLastBar() : null), num);
+  });
+
+  TV.chart.subscribeClick(tvOnClick);
+  return true;
+}
+
+function tvLastBar() {
+  const c = state.candles[state.candles.length - 1];
+  return c ? { open: c.open, high: c.high, low: c.low, close: c.close } : null;
+}
+
+function tvUpdateLegend(b, num) {
+  if (!TV.legend || !b) return;
+  const d = getDigits(state.symbol);
+  const col = b.close >= b.open ? "#00e5a0" : "#ff4d6d";
+  const n = tvChannelLen();
+  const numTxt = num === undefined || num === null ? "" :
+    ` &nbsp;<span style="color:#fbbf24">${num === 0 ? "Candle: current (forming)" : "Candle #" + num + " back"}` +
+    `${n && num >= 1 && num <= n ? " · in channel" : ""}</span>`;
+  TV.legend.innerHTML = `<span style="color:#cfe0f5">${state.symbol} · ${state.timeframe}</span>${numTxt} &nbsp;` +
+    `O <span style="color:${col}">${b.open.toFixed(d)}</span> H <span style="color:${col}">${b.high.toFixed(d)}</span> ` +
+    `L <span style="color:${col}">${b.low.toFixed(d)}</span> C <span style="color:${col}">${b.close.toFixed(d)}</span>`;
+}
+
+// Stack the volume + RSI/MACD sub-panes inside the same (unchanged) holder size.
+function tvApplyLayout() {
+  const n = (state.indicators.showRSI ? 1 : 0) + (state.indicators.showMACD ? 1 : 0);
+  const sig = String(n);
+  if (sig === TV.layoutSig) return;
+  TV.layoutSig = sig;
+  const h = 0.16;
+  const mainBottom = n * h + 0.02;
+  TV.chart.priceScale("right").applyOptions({ scaleMargins: { top: 0.05, bottom: mainBottom + 0.1 } });
+  TV.chart.priceScale("vol").applyOptions({ scaleMargins: { top: 1 - mainBottom - 0.1, bottom: mainBottom }, visible: false });
+  let slot = 0;
+  const place = (id) => {
+    const top = 1 - (n - slot) * h + 0.01, bottom = (n - slot - 1) * h + 0.01;
+    TV.chart.priceScale(id).applyOptions({ scaleMargins: { top, bottom }, borderVisible: false });
+    slot++;
+  };
+  if (state.indicators.showRSI) place("rsi");
+  if (state.indicators.showMACD) place("macd");
+}
+
+function tvSetData(series, times, vals) {
+  const out = [];
+  for (let i = 0; i < times.length; i++) if (vals[i] !== null && vals[i] !== undefined && isFinite(vals[i])) out.push({ time: times[i], value: vals[i] });
+  series.setData(out);
+}
+
+function renderFinancialChart() {
+  if (!tvEnsureChart()) return;
+  const candles = state.candles || [];
+  const digits = getDigits(state.symbol);
+  const ind = state.indicators;
+
+  const baseKey = `${state.symbol}|${state.timeframe}`;
+  const symbolChanged = TV.baseKey.split("|")[0] !== state.symbol;
+  const newView = baseKey !== TV.baseKey;
+  if (newView) {
+    if (symbolChanged) tvClearDrawings();
+    TV.baseKey = baseKey;
+    TV.tradeSig = ""; TV.markerSig = "";
+    const fmt = { type: "price", precision: digits, minMove: 1 / Math.pow(10, digits) };
+    TV.candle.applyOptions({ priceFormat: fmt });
   }
+  tvApplyLayout();
 
-  allDrawings.forEach(d => {
-    ctx.strokeStyle = d.color || "#00d1ff";
-    ctx.lineWidth = 1.5;
+  if (!candles.length) { TV.candle.setData([]); TV.lastLen = 0; return; }
 
-    if (d.type === "hline") {
-      const y = priceToY(d.price);
-      ctx.beginPath();
-      ctx.moveTo(60, y); ctx.lineTo(W - 15, y);
-      ctx.stroke();
+  // Dedupe on time (strictly ascending is required by the library)
+  const bars = [];
+  let lastT = -1;
+  candles.forEach(c => {
+    const t = tvTime(c.timestamp);
+    if (t > lastT) { bars.push({ t, c }); lastT = t; }
+  });
+  const times = bars.map(b => b.t);
+  const closes = bars.map(b => b.c.close);
 
-      ctx.fillStyle = d.color || "#00d1ff";
-      ctx.fillRect(W - 65, y - 9, 50, 18);
-      ctx.fillStyle = "#000";
-      ctx.font = "10px JetBrains Mono, monospace";
-      ctx.fillText(d.price.toFixed(digits), W - 62, y + 4);
-    } else if (d.type === "trendline") {
-      const x1 = indexToX(d.p1.idx);
-      const y1 = priceToY(d.p1.price);
-      const x2 = indexToX(d.p2.idx);
-      const y2 = priceToY(d.p2.price);
+  const ohlc = bars.map(b => ({ time: b.t, open: b.c.open, high: b.c.high, low: b.c.low, close: b.c.close }));
+  const vol = bars.map(b => ({ time: b.t, value: b.c.volume || 0,
+    color: b.c.close >= b.c.open ? "rgba(0,229,160,0.22)" : "rgba(255,77,109,0.22)" }));
+  if (newView || bars.length !== TV.lastLen) {
+    TV.candle.setData(ohlc);
+    TV.volume.setData(vol);
+  } else {
+    // live tick on the forming bar: update only the last bar so zoom/scroll is never disturbed
+    try {
+      TV.candle.update(ohlc[ohlc.length - 1]);
+      TV.volume.update(vol[vol.length - 1]);
+    } catch (e) {
+      TV.candle.setData(ohlc);
+      TV.volume.setData(vol);
+    }
+  }
+  if (newView) {
+    const n = bars.length;
+    TV.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - Math.max(state.zoomCount, tvChannelLen() ? tvChannelLen() + 15 : 0)), to: n + 6 });
+  }
+  TV.lastLen = bars.length;
 
-      ctx.beginPath();
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
-      ctx.stroke();
-    } else if (d.type === "rectangle") {
-      const x1 = indexToX(d.p1.idx);
-      const y1 = priceToY(d.p1.price);
-      const x2 = indexToX(d.p2.idx);
-      const y2 = priceToY(d.p2.price);
+  // ── Indicators (computed here from the candles; toggles show/hide them) ──
+  const e20 = tvEma(closes, 20), e50 = tvEma(closes, 50), e200 = tvEma(closes, 200);
+  TV.ema20.applyOptions({ visible: ind.showEMA });
+  TV.ema50.applyOptions({ visible: ind.showEMA });
+  TV.ema200.applyOptions({ visible: ind.showEMA });
+  tvSetData(TV.ema20, times, e20); tvSetData(TV.ema50, times, e50); tvSetData(TV.ema200, times, e200);
 
-      const rx = Math.min(x1, x2);
-      const ry = Math.min(y1, y2);
-      const rw = Math.abs(x2 - x1);
-      const rh = Math.abs(y2 - y1);
+  // Bollinger (20, 2)
+  const bu = [], bl = [];
+  for (let i = 0; i < closes.length; i++) {
+    if (i < 19) { bu.push(null); bl.push(null); continue; }
+    const w = closes.slice(i - 19, i + 1), m = w.reduce((a, b) => a + b, 0) / 20;
+    const sd = Math.sqrt(w.reduce((a, b) => a + (b - m) * (b - m), 0) / 20);
+    bu.push(m + 2 * sd); bl.push(m - 2 * sd);
+  }
+  TV.bbU.applyOptions({ visible: ind.showBollinger }); TV.bbL.applyOptions({ visible: ind.showBollinger });
+  tvSetData(TV.bbU, times, bu); tvSetData(TV.bbL, times, bl);
 
-      ctx.fillStyle = "rgba(0, 209, 255, 0.15)";
-      ctx.fillRect(rx, ry, rw, rh);
-      ctx.strokeRect(rx, ry, rw, rh);
-    } else if (d.type === "fibo") {
-      const pMin = Math.min(d.p1.price, d.p2.price);
-      const pMax = Math.max(d.p1.price, d.p2.price);
-      const diff = pMax - pMin;
+  // VWAP (resets each UTC day)
+  let pv = 0, vv = 0, day = -1;
+  const vw = bars.map(b => {
+    const d = Math.floor(b.t / 86400);
+    if (d !== day) { day = d; pv = 0; vv = 0; }
+    const v = b.c.volume || 1;
+    pv += ((b.c.high + b.c.low + b.c.close) / 3) * v; vv += v;
+    return pv / vv;
+  });
+  TV.vwap.applyOptions({ visible: ind.showVWAP });
+  tvSetData(TV.vwap, times, vw);
 
-      const levels = [
-        { pct: 0.0, label: "0.0%" },
-        { pct: 0.236, label: "23.6%" },
-        { pct: 0.382, label: "38.2%" },
-        { pct: 0.500, label: "50.0%" },
-        { pct: 0.618, label: "61.8%" },
-        { pct: 0.786, label: "78.6%" },
-        { pct: 1.000, label: "100.0%" }
-      ];
+  // Donchian channel (only when that strategy is active): previous 100 bars' high/low
+  // Only meaningful when the chart timeframe is the strategy timeframe (else the N-candle window is wrong)
+  const donOn = !!(state.riskSettings && ["DONCHIAN_TREND", "PORTFOLIO_TREND"].includes(state.riskSettings.strategy_profile) && tvChannelLen() > 0);
+  const ch = tvChannelLen() || 100, du = [], dl = [];
+  for (let i = 0; i < bars.length; i++) {
+    if (!donOn || i < ch) { du.push(null); dl.push(null); continue; }
+    let hi = -Infinity, lo = Infinity;
+    for (let j = i - ch; j < i; j++) { if (bars[j].c.high > hi) hi = bars[j].c.high; if (bars[j].c.low < lo) lo = bars[j].c.low; }
+    du.push(hi); dl.push(lo);
+  }
+  const showDon = donOn && ind.showDonchian !== false;
 
-      levels.forEach(lvl => {
-        const lvlPrice = pMax - diff * lvl.pct;
-        const ly = priceToY(lvlPrice);
+  // ── Candle numbering: #0 = current (forming) candle, #1 = last closed, #2 = one before... ──
+  const forming = bars.length > 0 && bars[bars.length - 1].c.is_closed === false;
+  const closedLen = forming ? bars.length - 1 : bars.length;
+  TV.numByTime = new Map();
+  bars.forEach((b, i) => TV.numByTime.set(b.t, i >= closedLen ? 0 : closedLen - i));
+  TV.lastNum = forming ? 0 : 1;
 
-        ctx.beginPath();
-        ctx.moveTo(60, ly);
-        ctx.lineTo(W - 15, ly);
-        ctx.strokeStyle = lvl.pct === 0.5 ? "#fbbf24" : "rgba(0, 209, 255, 0.6)";
-        ctx.setLineDash([4, 4]);
-        ctx.stroke();
-        ctx.setLineDash([]);
+  // ── Channel window (the N closed candles the bot looks back over) ──
+  const N = tvChannelLen();
+  TV.chanMarkers = [];
+  let shade = [];
+  if (showDon && N > 0 && closedLen > 0) {
+    const first = Math.max(0, closedLen - N);          // oldest candle of the window
+    let hiI = first, loI = first;
+    for (let i = first; i < closedLen; i++) {
+      if (bars[i].c.high > bars[hiI].c.high) hiI = i;
+      if (bars[i].c.low < bars[loI].c.low) loI = i;
+      shade.push({ time: bars[i].t, value: 1, color: "rgba(0,209,255,0.07)" });
+    }
+    const span = closedLen - first;
+    TV.chanMarkers.push({ time: bars[first].t, position: "aboveBar", color: "#fbbf24", shape: "square",
+      text: `#${span} ◄ channel start` });
+    TV.chanMarkers.push({ time: bars[hiI].t, position: "aboveBar", color: "#38bdf8", shape: "arrowDown",
+      text: `Ch High #${closedLen - hiI}` });
+    TV.chanMarkers.push({ time: bars[loI].t, position: "belowBar", color: "#f472b6", shape: "arrowUp",
+      text: `Ch Low #${closedLen - loI}` });
+  }
+  TV.shade.setData(shade);
+  TV.donU.applyOptions({ visible: showDon }); TV.donL.applyOptions({ visible: showDon });
+  tvSetData(TV.donU, times, du); tvSetData(TV.donL, times, dl);
 
-        ctx.fillStyle = "#8ba0bb";
-        ctx.font = "9px JetBrains Mono, monospace";
-        ctx.fillText(`${lvl.label} (${lvlPrice.toFixed(digits)})`, 65, ly - 3);
-      });
+  // RSI (14, Wilder)
+  const rs = new Array(closes.length).fill(null);
+  if (closes.length > 15) {
+    let ag = 0, al = 0;
+    for (let i = 1; i <= 14; i++) { const d = closes[i] - closes[i - 1]; if (d >= 0) ag += d; else al -= d; }
+    ag /= 14; al /= 14;
+    rs[14] = al === 0 ? 100 : 100 - 100 / (1 + ag / al);
+    for (let i = 15; i < closes.length; i++) {
+      const d = closes[i] - closes[i - 1];
+      ag = (ag * 13 + Math.max(d, 0)) / 14; al = (al * 13 + Math.max(-d, 0)) / 14;
+      rs[i] = al === 0 ? 100 : 100 - 100 / (1 + ag / al);
+    }
+  }
+  TV.rsi.applyOptions({ visible: ind.showRSI });
+  tvSetData(TV.rsi, times, rs);
+
+  // MACD (12, 26, 9)
+  const e12 = tvEma(closes, 12), e26 = tvEma(closes, 26);
+  const macd = closes.map((_, i) => (e12[i] !== null && e26[i] !== null) ? e12[i] - e26[i] : null);
+  const firstIdx = macd.findIndex(v => v !== null);
+  const sigRaw = tvEma(macd.slice(firstIdx < 0 ? 0 : firstIdx).map(v => v ?? 0), 9);
+  const sig = macd.map((_, i) => (firstIdx >= 0 && i >= firstIdx && sigRaw[i - firstIdx] !== undefined) ? sigRaw[i - firstIdx] : null);
+  TV.macdHist.applyOptions({ visible: ind.showMACD }); TV.macdLine.applyOptions({ visible: ind.showMACD }); TV.macdSig.applyOptions({ visible: ind.showMACD });
+  TV.macdHist.setData(times.map((t, i) => (macd[i] !== null && sig[i] !== null) ? { time: t, value: macd[i] - sig[i], color: macd[i] - sig[i] >= 0 ? "rgba(0,229,160,0.6)" : "rgba(255,77,109,0.6)" } : null).filter(Boolean));
+  tvSetData(TV.macdLine, times, macd); tvSetData(TV.macdSig, times, sig);
+
+  tvUpdateTradeOverlays(times);
+  tvUpdateLegend(tvLastBar(), TV.lastNum);
+}
+
+// Entry / SL / TP lines for every open trade (and pending order) on the chart symbol.
+function tvUpdateTradeOverlays(times) {
+  const LW = window.LightweightCharts;
+  const d = getDigits(state.symbol);
+  const specs = [];
+  const markers = [];
+
+  (state.positions || []).filter(p => p.symbol === state.symbol).forEach(p => {
+    const buy = p.side === "BUY";
+    const pnl = Number(p.pnl_usd || 0);
+    specs.push({ price: p.entry_price, color: buy ? "#00e5a0" : "#ff4d6d", style: LW.LineStyle.Dashed, width: 1,
+      title: `${p.side} ${p.lots} | ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}$` });
+    if (p.sl_price) specs.push({ price: p.sl_price, color: "#ff4d6d", style: LW.LineStyle.Dotted, width: 2, title: `SL ${Number(p.sl_price).toFixed(d)}` });
+    if (p.tp_price) specs.push({ price: p.tp_price, color: "#00e5a0", style: LW.LineStyle.Dotted, width: 2, title: `TP ${Number(p.tp_price).toFixed(d)}` });
+
+    if (p.open_time && times.length) {
+      const t = tvTime(p.open_time);
+      let snap = null;
+      for (let i = times.length - 1; i >= 0; i--) { if (times[i] <= t) { snap = times[i]; break; } }
+      if (snap !== null) markers.push({ time: snap, position: buy ? "belowBar" : "aboveBar", color: buy ? "#00e5a0" : "#ff4d6d",
+        shape: buy ? "arrowUp" : "arrowDown", text: `${p.side} ${p.lots}` });
     }
   });
+
+  (state.pendingOrders || []).filter(o => o.symbol === state.symbol).forEach(o => {
+    specs.push({ price: o.target_price, color: "#fbbf24", style: LW.LineStyle.LargeDashed, width: 1, title: `${o.order_type} ${o.side} ${o.lots}` });
+    if (o.sl_price) specs.push({ price: o.sl_price, color: "rgba(255,77,109,0.6)", style: LW.LineStyle.Dotted, width: 1, title: "SL" });
+    if (o.tp_price) specs.push({ price: o.tp_price, color: "rgba(0,229,160,0.6)", style: LW.LineStyle.Dotted, width: 1, title: "TP" });
+  });
+
+  const sig = JSON.stringify(specs);
+  if (sig !== TV.tradeSig) {
+    TV.tradeLines.forEach(l => { try { TV.candle.removePriceLine(l); } catch (e) {} });
+    TV.tradeLines = specs.map(s => TV.candle.createPriceLine({
+      price: s.price, color: s.color, lineWidth: s.width, lineStyle: s.style, axisLabelVisible: true, title: s.title }));
+    TV.tradeSig = sig;
+  }
+
+  TV.tradeMarkers = markers;
+  tvApplyMarkers();
+}
+
+// ── Automatic support / resistance (display only; levels come from /market/levels) ──
+async function refreshSupportResistance() {
+  if (!TV.chart || !TV.candle) return;
+  const mode = state.indicators.srMode || "nearby";               // off | nearby | all
+  if (mode === "off") { tvDrawSupportResistance([]); return; }
+  const key = `${state.symbol}|${state.timeframe}`;
+  const data = await apiFetch(`/api/v1/market/levels?symbol=${encodeURIComponent(state.symbol)}&timeframe=${encodeURIComponent(state.timeframe)}`);
+  if (key !== `${state.symbol}|${state.timeframe}`) return;      // chart changed while waiting
+  let levels = data && data.levels ? data.levels : [];
+  if (mode === "nearby") {                                         // 2 closest resistances + 2 closest supports
+    const near = (kind) => levels.filter(l => l.kind === kind).sort((a, b) => Math.abs(a.distance) - Math.abs(b.distance)).slice(0, 2);
+    levels = [...near("resistance"), ...near("support")];
+  }
+  tvDrawSupportResistance(levels);
+}
+
+function applySRButton() {
+  const b = el("toggle-sr");
+  if (!b) return;
+  const mode = state.indicators.srMode || "nearby";
+  const label = { off: "S/R Off", nearby: "S/R Nearby 2+2", all: "S/R All" }[mode];
+  b.innerHTML = `<i class="fa-solid fa-ruler-horizontal"></i> ${label}`;
+  b.classList.toggle("active", mode !== "off");
+}
+
+function tvDrawSupportResistance(levels) {
+  const LW = window.LightweightCharts;
+  const d = getDigits(state.symbol);
+  const specs = levels.map(lv => {
+    const res = lv.kind === "resistance";
+    const alpha = lv.strength >= 3 ? 0.95 : lv.strength === 2 ? 0.7 : 0.45;
+    return { price: lv.price, width: lv.strength >= 3 ? 2 : 1,
+      style: lv.strength >= 2 ? LW.LineStyle.Solid : LW.LineStyle.Dashed,
+      color: res ? `rgba(255,77,109,${alpha})` : `rgba(0,229,160,${alpha})`,
+      title: `${res ? "R" : "S"} ${lv.tf} x${lv.touches}` };
+  });
+  const sig = JSON.stringify(specs) + d;
+  if (sig === TV.srSig) return;
+  TV.srLines.forEach(l => { try { TV.candle.removePriceLine(l); } catch (e) {} });
+  TV.srLines = specs.map(s => TV.candle.createPriceLine({
+    price: s.price, color: s.color, lineWidth: s.width, lineStyle: s.style, axisLabelVisible: true, title: s.title }));
+  TV.srSig = sig;
+}
+
+// ── Zoom buttons (wheel / drag zoom + pan are native in the chart) ──
+function tvZoom(factor) {
+  if (!TV.chart) return;
+  const r = TV.chart.timeScale().getVisibleLogicalRange();
+  if (!r) return;
+  const span = Math.max(10, (r.to - r.from) * factor);
+  TV.chart.timeScale().setVisibleLogicalRange({ from: r.to - span, to: r.to });
+}
+function tvResetView() {
+  if (!TV.chart) return;
+  const n = state.candles.length;
+  state.zoomCount = 60;
+  const view = Math.max(60, tvChannelLen() ? tvChannelLen() + 15 : 0);
+  TV.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - view), to: n + 6 });
+}
+
+// ── Drawing tools (hline, trendline, rectangle, fibo) ──
+function tvClearDrawings() {
+  TV.drawLines.forEach(l => { try { TV.candle.removePriceLine(l); } catch (e) {} });
+  TV.drawSeries.forEach(s => { try { TV.chart.removeSeries(s); } catch (e) {} });
+  TV.drawLines = []; TV.drawSeries = [];
+}
+
+function tvSegment(t1, p1, t2, p2, color) {
+  if (t1 === t2) return;
+  const s = TV.chart.addLineSeries({ color, lineWidth: 2, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
+  s.setData(t1 < t2 ? [{ time: t1, value: p1 }, { time: t2, value: p2 }] : [{ time: t2, value: p2 }, { time: t1, value: p1 }]);
+  TV.drawSeries.push(s);
+}
+
+function tvOnClick(param) {
+  const tool = state.activeTool;
+  if (!tool || tool === "crosshairs" || !param || !param.point || !param.time) return;
+  const price = TV.candle.coordinateToPrice(param.point.y);
+  if (price === null || price === undefined) return;
+  const d = getDigits(state.symbol);
+  const LW = window.LightweightCharts;
+  const cyan = "#00d1ff";
+
+  if (tool === "hline") {
+    TV.drawLines.push(TV.candle.createPriceLine({ price, color: cyan, lineWidth: 1, axisLabelVisible: true, title: "H-Line" }));
+    addAuditEntry(`[DRAWING] Placed Horizontal Line @ ${price.toFixed(d)}`);
+    return;
+  }
+  if (!state.drawingInProgress) {
+    state.drawingInProgress = { type: tool, p1: { time: param.time, price } };
+    addAuditEntry(`[DRAWING] ${tool.toUpperCase()}: click a second point`);
+    return;
+  }
+  const a = state.drawingInProgress.p1, b = { time: param.time, price };
+  state.drawingInProgress = null;
+  if (tool === "trendline") {
+    tvSegment(a.time, a.price, b.time, b.price, cyan);
+  } else if (tool === "rectangle") {
+    tvSegment(a.time, a.price, b.time, a.price, cyan);
+    tvSegment(a.time, b.price, b.time, b.price, cyan);
+  } else if (tool === "fibo") {
+    const hi = Math.max(a.price, b.price), lo = Math.min(a.price, b.price), diff = hi - lo;
+    [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1].forEach(pct => {
+      TV.drawLines.push(TV.candle.createPriceLine({ price: hi - diff * pct, lineWidth: 1, lineStyle: LW.LineStyle.Dashed,
+        color: pct === 0.5 ? "#fbbf24" : "rgba(0,209,255,0.6)", axisLabelVisible: true, title: `${(pct * 100).toFixed(1)}%` }));
+    });
+  }
+  addAuditEntry(`[DRAWING] Completed ${tool.toUpperCase()} drawing`);
 }
 
 function initCanvasInteractions() {
-  const canvas = el("financialChartCanvas");
-  if (!canvas) return;
-
-  canvas.addEventListener("wheel", (e) => {
-    e.preventDefault();
-    state.zoomCount = e.deltaY < 0 ? Math.max(15, state.zoomCount - 5) : Math.min(200, state.zoomCount + 5);
-    renderFinancialChart();
-  });
-
-  canvas.addEventListener("mousedown", (e) => {
-    if (e.button !== 0) return; // Primary click only
-    const rect = canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-
-    const total = state.candles.length;
-    if (total === 0) return;
-    const count = Math.min(total, Math.max(15, state.zoomCount));
-    const endIdx = Math.max(count, Math.min(total, total - state.panOffset));
-    const startIdx = Math.max(0, endIdx - count);
-    const visible = state.candles.slice(startIdx, endIdx);
-    if (visible.length === 0) return;
-
-    const W = canvas.width;
-    const H = canvas.height;
-    const hasRSI  = state.indicators.showRSI;
-    const hasMACD = state.indicators.showMACD;
-    const subchartCount = (hasRSI ? 1 : 0) + (hasMACD ? 1 : 0);
-    const subchartH     = subchartCount > 0 ? Math.min(75, (H * 0.2) / subchartCount) : 0;
-    const mainH         = H - (subchartH * subchartCount) - 30;
-
-    const highs = visible.map(c => c.high);
-    const lows  = visible.map(c => c.low);
-    const minP  = Math.min(...lows);
-    const maxP  = Math.max(...highs);
-    const rangeP = maxP - minP || 0.001;
-
-    const gap = (W - 75) / visible.length;
-    const hoverP = maxP - ((my - 20) / (mainH - 40)) * rangeP;
-    const hoverIdx = Math.max(startIdx, Math.min(endIdx - 1, startIdx + Math.floor((mx - 60) / gap)));
-
-    if (state.activeTool === "crosshairs") {
-      state.isPanning = true;
-      state.dragStart = { x: e.clientX, panOffset: state.panOffset };
-    } else if (state.activeTool === "hline") {
-      state.drawings.push({ type: "hline", price: hoverP, color: "#00d1ff" });
-      addAuditEntry(`[DRAWING] Placed Horizontal Line @ ${hoverP.toFixed(5)}`);
-      renderFinancialChart();
-    } else if (["trendline", "rectangle", "fibo"].includes(state.activeTool)) {
-      if (!state.drawingInProgress) {
-        state.drawingInProgress = {
-          type: state.activeTool,
-          p1: { idx: hoverIdx, price: hoverP },
-          p2: { idx: hoverIdx, price: hoverP },
-          color: "#00d1ff"
-        };
-      } else {
-        state.drawingInProgress.p2 = { idx: hoverIdx, price: hoverP };
-        state.drawings.push({ ...state.drawingInProgress });
-        addAuditEntry(`[DRAWING] Completed ${state.activeTool.toUpperCase()} drawing`);
-        state.drawingInProgress = null;
-        renderFinancialChart();
-      }
-    }
-  });
-
-  canvas.addEventListener("mousemove", (e) => {
-    const rect = canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-    state.mousePos = { x: mx, y: my };
-
-    if (state.isPanning && state.dragStart) {
-      const deltaX = e.clientX - state.dragStart.x;
-      const gap = (canvas.width - 75) / Math.max(1, state.zoomCount);
-      const deltaBars = Math.round(deltaX / gap);
-      const newOffset = Math.max(0, Math.min(state.candles.length - state.zoomCount, state.dragStart.panOffset + deltaBars));
-      if (newOffset !== state.panOffset) {
-        state.panOffset = newOffset;
-      }
-    }
-
-    if (state.drawingInProgress) {
-      const total = state.candles.length;
-      const count = Math.min(total, Math.max(15, state.zoomCount));
-      const endIdx = Math.max(count, Math.min(total, total - state.panOffset));
-      const startIdx = Math.max(0, endIdx - count);
-      const visible = state.candles.slice(startIdx, endIdx);
-      if (visible.length > 0) {
-        const W = canvas.width;
-        const H = canvas.height;
-        const mainH = H - ((state.indicators.showRSI ? 75 : 0) + (state.indicators.showMACD ? 75 : 0)) - 30;
-        const highs = visible.map(c => c.high);
-        const lows  = visible.map(c => c.low);
-        const minP  = Math.min(...lows);
-        const maxP  = Math.max(...highs);
-        const rangeP = maxP - minP || 0.001;
-        const gap = (W - 75) / visible.length;
-
-        const hoverP = maxP - ((my - 20) / (mainH - 40)) * rangeP;
-        const hoverIdx = Math.max(startIdx, Math.min(endIdx - 1, startIdx + Math.floor((mx - 60) / gap)));
-        state.drawingInProgress.p2 = { idx: hoverIdx, price: hoverP };
-      }
-    }
-
-    renderFinancialChart();
-  });
-
-  const stopPanning = () => {
-    state.isPanning = false;
-    state.dragStart = null;
-  };
-  canvas.addEventListener("mouseup", stopPanning);
-  canvas.addEventListener("mouseleave", stopPanning);
+  tvEnsureChart();
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1887,12 +2056,75 @@ const RISK_HELP_DICTIONARY = {
   },
   "cfg-strategy-profile": {
     title: "Trading Strategy",
-    summary: "Which rules create entry signals. DONCHIAN TREND is the backtested H1 strategy; LEGACY is the old multi-setup engine that lost money on demo.",
-    increase: "<strong>DONCHIAN TREND:</strong> ~60 trades/year, 34-40% win rate, profit comes from a few large trend moves.",
+    summary: "Which rules create entry signals. PORTFOLIO runs three backtested trend strategies together (Donchian H1, Supertrend H4, Pullback H4); DONCHIAN TREND runs the first one alone; LEGACY is the old multi-setup engine that lost money on demo.",
+    increase: "<strong>PORTFOLIO:</strong> ~96 trades/year (backtest 2016-2026: PF 1.40, +185R, max drawdown 41R). <strong>DONCHIAN TREND:</strong> ~35 trades/year, profit comes from a few large trend moves.",
     decrease: "<strong>LEGACY:</strong> many M15 trades from 15 unverified setups. Not recommended.",
     execution: "Decides when a BUY or SELL signal is produced.",
     limit: "All risk limits below still apply to every signal.",
     example: "A close above the last 100 H1 highs opens a BUY with a 3xATR stop."
+  },
+  "cfg-pf-donchian": {
+    title: "Portfolio: Donchian Trend (H1)",
+    summary: "Buys/sells when an H1 candle closes beyond the high/low of the lookback window, only with the daily trend.",
+    increase: "<strong>ON:</strong> ~35 trades/year; a few big trend wins pay for many small losses (win rate 34-40%).",
+    decrease: "<strong>OFF:</strong> this strategy is never evaluated or traded. Trades it already opened keep their trailing stop.",
+    execution: "Stop 3xATR, trailing stop 4xATR on closed H1 candles, no fixed take-profit.",
+    limit: "One open trade at most. Lookback and trend average come from the fields below.",
+    example: "H1 closes above the previous 85 hours' high while the daily close is above its 200-day average: BUY."
+  },
+  "cfg-pf-supertrend": {
+    title: "Portfolio: Supertrend + EMA200 (H4)",
+    summary: "Takes the H4 Supertrend(10, 2) flip when price is on the same side of the EMA200.",
+    increase: "<strong>ON:</strong> ~35 trades/year, smaller drawdown than the H1 strategies in the backtest.",
+    decrease: "<strong>OFF:</strong> never evaluated. A trade it already opened is still closed when Supertrend flips.",
+    execution: "Stop 3xATR. No trailing stop: the bot closes the trade when the H4 Supertrend flips against it.",
+    limit: "One open trade at most.",
+    example: "Supertrend turns bullish on an H4 close that is above the EMA200: BUY, exit when it turns bearish."
+  },
+  "cfg-pf-pullback": {
+    title: "Portfolio: Trend Pullback (H4)",
+    summary: "In a daily trend, enters when an H4 candle dips to EMA20 and closes back on the trend side.",
+    increase: "<strong>ON:</strong> ~26 trades/year, catches the smaller moves inside a trend that the breakout strategy misses.",
+    decrease: "<strong>OFF:</strong> never evaluated. Open trades keep their trailing stop.",
+    execution: "Stop 2xATR, trailing stop 3xATR on closed H4 candles. Needs EMA20 above EMA50 for BUY (below for SELL).",
+    limit: "One open trade at most.",
+    example: "Daily trend UP, H4 low touches EMA20 and the candle closes bullish above it: BUY."
+  },
+  "cfg-pf-donchian-tf": {
+    title: "Donchian timeframe",
+    summary: "Chart the Donchian breakout is read on. The lookback (hours) is converted to candles: H1 = 1 per hour, M15 = 4.",
+    increase: "<strong>M15:</strong> ~62 trades/year in tests, bigger drawdown (40R vs 27R) and PF falls to ~1.0 if spreads triple.",
+    decrease: "<strong>H1:</strong> ~35 trades/year, handles wider spreads better. Recommended.",
+    execution: "Takes effect on the next closed candle. An open trade keeps trailing on the timeframe it was opened on.",
+    limit: "Only H1 and M15 were tested for Donchian.",
+    example: "100 hours = 100 H1 candles or 400 M15 candles."
+  },
+  "cfg-pf-supertrend-tf": {
+    title: "Supertrend timeframe",
+    summary: "Chart the Supertrend flip and EMA200 are read on. Parameters change with it to the best tested ones: H4 ST(10,2) stop 3xATR, H1 ST(14,3) stop 3xATR, M15 ST(14,3) stop 2xATR.",
+    increase: "<strong>H1 / M15:</strong> more trades (H1 ~100+/yr, M15 ~330+/yr) but H1 drawdown 32R and M15 84R vs 9R on H4, and thinner profit after costs.",
+    decrease: "<strong>H4:</strong> PF 1.39, drawdown 9R, still PF 1.30 at 3x costs. Recommended.",
+    execution: "The trade is closed when the Supertrend of ITS timeframe flips against it.",
+    limit: "M15 history in the tests covers only Aug 2022 on.",
+    example: "H4 Supertrend turns bullish with price above the H4 EMA200: BUY."
+  },
+  "cfg-pf-pullback-tf": {
+    title: "Pullback timeframe",
+    summary: "Chart the EMA20 pullback is read on (the daily trend filter is always the 200-day average). H4: stop 2xATR / trail 3xATR; H1 and M15: stop 3xATR / trail 4xATR.",
+    increase: "<strong>H1 / M15:</strong> more trades but H1 drawdown 34R, M15 59R (96R at 3x costs) vs 13R on H4.",
+    decrease: "<strong>H4:</strong> PF 1.45, drawdown 13R, PF 1.34 at 3x costs. Recommended.",
+    execution: "Takes effect on the next closed candle. An open trade keeps trailing on the timeframe it was opened on.",
+    limit: "M15 history in the tests covers only Aug 2022 on.",
+    example: "Daily trend UP, an H1 candle dips to EMA20 and closes bullish above it: BUY."
+  },
+  "cfg-pf-risk": {
+    title: "Risk per strategy trade (%)",
+    summary: "Share of equity lost if one portfolio trade hits its stop. Replaces 'Max risk per trade' in portfolio mode.",
+    increase: "<strong>Higher:</strong> bigger lots, bigger profits and bigger drawdowns. Three trades open at 1.0% = 3% at risk at once.",
+    decrease: "<strong>Lower:</strong> smaller lots and a smoother equity curve. The backtest drawdown (41R) is 41 x this percentage.",
+    execution: "Lot = equity x risk% / (stop distance x 100), capped by Max Lot.",
+    limit: "0.1 to 2.0. Daily/weekly loss limits still apply.",
+    example: "$10,000 equity, 0.5% risk, $20 stop: lot = 50 / (20 x 100) = 0.02."
   },
   "cfg-max-consecutive-losses": {
     title: "Pause After Consecutive Losses",
@@ -2168,8 +2400,17 @@ function initControls() {
     const payload = {
       ...prevCfg,
       strategy_profile: strategy,
-      donchian_timeframe: pick("cfg-donchian-tf") || prevCfg.donchian_timeframe || "H1",
-      entry_timeframe: strategy === "DONCHIAN_TREND" ? (pick("cfg-donchian-tf") || "H1") : (prevCfg.entry_timeframe || "M15"),
+      portfolio_donchian_enabled: pick("cfg-pf-donchian") !== "false",
+      portfolio_supertrend_enabled: pick("cfg-pf-supertrend") !== "false",
+      portfolio_pullback_enabled: pick("cfg-pf-pullback") !== "false",
+      portfolio_risk_per_strategy_pct: getFloat("cfg-pf-risk", prevCfg.portfolio_risk_per_strategy_pct ?? 0.5),
+      portfolio_donchian_tf: pick("cfg-pf-donchian-tf") || prevCfg.portfolio_donchian_tf || "H1",
+      portfolio_supertrend_tf: pick("cfg-pf-supertrend-tf") || prevCfg.portfolio_supertrend_tf || "H4",
+      portfolio_pullback_tf: pick("cfg-pf-pullback-tf") || prevCfg.portfolio_pullback_tf || "H4",
+      donchian_timeframe: strategy === "PORTFOLIO_TREND" ? "H1" : (pick("cfg-donchian-tf") || prevCfg.donchian_timeframe || "H1"),
+      donchian_channel_hours: getInt("cfg-donchian-hours", prevCfg.donchian_channel_hours ?? 100),
+      donchian_trend_sma: getInt("cfg-donchian-sma", prevCfg.donchian_trend_sma ?? 200),
+      entry_timeframe: strategy === "PORTFOLIO_TREND" ? "H1" : strategy === "DONCHIAN_TREND" ? (pick("cfg-donchian-tf") || "H1") : (prevCfg.entry_timeframe || "M15"),
       lot_sizing_mode: pick("cfg-lot-mode") || "DYNAMIC_RISK",
       max_risk_per_trade_pct: getFloat("cfg-max-risk", 1.0),
       user_configured_lot: getFloat("cfg-user-lot", 0.01),
@@ -2214,6 +2455,7 @@ function initControls() {
       const why = (res && res.message) ? res.message : "Failed to save risk settings on backend. Check server log.";
       addAuditEntry(`[SETTINGS] ${why}`, "var(--accent-red)");
       if (res && res.settings) updateRiskSettingsUI(res.settings, true);  // show what is really active
+      else updateRiskSettingsUI(prevCfg, true);                           // no answer: undo the optimistic update
       alert(why);
     }
   });
@@ -2650,12 +2892,22 @@ function renderBacktestEquityCurve(curve) {
   el("toggle-bollinger").addEventListener("click", () => { state.indicators.showBollinger = !state.indicators.showBollinger; el("toggle-bollinger").classList.toggle("active", state.indicators.showBollinger); renderFinancialChart(); });
   el("toggle-ob").addEventListener("click", () => { state.indicators.showOB = !state.indicators.showOB; el("toggle-ob").classList.toggle("active", state.indicators.showOB); renderFinancialChart(); });
   el("toggle-rsi").addEventListener("click", () => { state.indicators.showRSI = !state.indicators.showRSI; el("toggle-rsi").classList.toggle("active", state.indicators.showRSI); renderFinancialChart(); });
+  if (el("toggle-sr")) {
+    applySRButton();
+    el("toggle-sr").addEventListener("click", () => {
+      const next = { nearby: "all", all: "off", off: "nearby" };
+      state.indicators.srMode = next[state.indicators.srMode || "nearby"];
+      applySRButton();
+      refreshSupportResistance();
+    });
+  }
+  if (el("toggle-donchian")) el("toggle-donchian").addEventListener("click", () => { state.indicators.showDonchian = state.indicators.showDonchian === false; el("toggle-donchian").classList.toggle("active", state.indicators.showDonchian !== false); renderFinancialChart(); });
   el("toggle-macd").addEventListener("click", () => { state.indicators.showMACD = !state.indicators.showMACD; el("toggle-macd").classList.toggle("active", state.indicators.showMACD); renderFinancialChart(); });
 
   // Zoom & Fullscreen Controls
-  if (el("btn-zoom-in")) el("btn-zoom-in").addEventListener("click", () => { state.zoomCount = Math.max(15, state.zoomCount - 10); renderFinancialChart(); });
-  if (el("btn-zoom-out")) el("btn-zoom-out").addEventListener("click", () => { state.zoomCount = Math.min(200, state.zoomCount + 10); renderFinancialChart(); });
-  if (el("btn-zoom-reset")) el("btn-zoom-reset").addEventListener("click", () => { state.zoomCount = 60; state.panOffset = 0; renderFinancialChart(); });
+  if (el("btn-zoom-in")) el("btn-zoom-in").addEventListener("click", () => tvZoom(0.8));
+  if (el("btn-zoom-out")) el("btn-zoom-out").addEventListener("click", () => tvZoom(1.25));
+  if (el("btn-zoom-reset")) el("btn-zoom-reset").addEventListener("click", () => tvResetView());
   if (el("btn-fullscreen")) el("btn-fullscreen").addEventListener("click", () => {
     const holder = el("canvas-holder");
     if (!document.fullscreenElement) {
@@ -2671,7 +2923,7 @@ function renderBacktestEquityCurve(curve) {
   el("tool-hline").addEventListener("click", () => { state.activeTool = "hline"; updateDrawingToolsUI(); });
   el("tool-rectangle").addEventListener("click", () => { state.activeTool = "rectangle"; updateDrawingToolsUI(); });
   el("tool-fibo").addEventListener("click", () => { state.activeTool = "fibo"; updateDrawingToolsUI(); });
-  el("tool-clear-drawings").addEventListener("click", () => { state.drawings = []; state.drawingInProgress = null; addAuditEntry("[DRAWING] Cleared all drawings"); renderFinancialChart(); });
+  el("tool-clear-drawings").addEventListener("click", () => { state.drawings = []; state.drawingInProgress = null; tvClearDrawings(); addAuditEntry("[DRAWING] Cleared all drawings"); });
 
   // Bottom Tabs
   document.querySelectorAll(".tab-btn").forEach(btn => {
@@ -2967,10 +3219,17 @@ async function bootstrap() {
     }
   }, 4000);
 
+  refreshSupportResistance();
+  setInterval(refreshSupportResistance, 10000);     // backend only recomputes when a candle closes
   startAutoAnalysisScheduler();
 
   refreshDonchianPanel();
   setInterval(refreshDonchianPanel, 5000);
+  refreshPortfolioPanel();
+  setInterval(refreshPortfolioPanel, 5000);
+  applyStrategyPanels();
+  if (el("cfg-strategy-profile")) el("cfg-strategy-profile").addEventListener("change", syncStrategyForm);
+  if (el("cfg-pf-donchian")) el("cfg-pf-donchian").addEventListener("change", syncStrategyForm);
 
   const popupCloseBtn = el("popup-close-btn");
   if (popupCloseBtn) {
@@ -3225,6 +3484,7 @@ function renderDonchianPanel(d) {
     } else txt = n.status === "LIVE" && !/unavailable/i.test(n.message || "") ? "News: no high-impact USD news coming up" : "News: calendar unavailable (not blocking)";
     newsEl.innerHTML = txt;
   }
+  state.dtStatus = d;   // the chart reads the channel the bot REALLY trades on from here
   if (el("dt-sub")) el("dt-sub").textContent = `${d.timeframe || "H1"} · ${d.channel_bars || 100} candles`;
   el("dt-high").textContent = fmt(d.channel_high, 2);
   el("dt-low").textContent = fmt(d.channel_low, 2);
@@ -3276,6 +3536,125 @@ function renderDonchianPanel(d) {
       <span class="pnl" style="color:${pnlColor}">${money(p.pnl_usd)}</span>
       <span class="sub">Stop ${fmt(p.sl, 2)} (${locked}) · next trail ${fmt(p.next_trail, 2)}${moves ? " ↑ will move" : ""}</span>
     </div>`;
+  }).join("");
+}
+
+
+// ─────────────────────────────────────────────────────────────
+//  PORTFOLIO STRATEGY PANEL (Donchian H1 + Supertrend H4 + Pullback H4)
+// ─────────────────────────────────────────────────────────────
+// "H1 + H4" style summary of the timeframes of the enabled portfolio strategies.
+function portfolioTimeframes(rs) {
+  if (!rs) return "H1 + H4";
+  const tfs = [];
+  if (rs.portfolio_donchian_enabled !== false) tfs.push(String(rs.portfolio_donchian_tf || "H1").toUpperCase());
+  if (rs.portfolio_supertrend_enabled !== false) tfs.push(String(rs.portfolio_supertrend_tf || "H4").toUpperCase());
+  if (rs.portfolio_pullback_enabled !== false) tfs.push(String(rs.portfolio_pullback_tf || "H4").toUpperCase());
+  const order = { M15: 0, H1: 1, H4: 2 };
+  return [...new Set(tfs)].sort((a, b) => order[a] - order[b]).join(" + ") || "--";
+}
+
+function isPortfolioMode() {
+  return !!(state.riskSettings && state.riskSettings.strategy_profile === "PORTFOLIO_TREND");
+}
+
+// Show the panel that belongs to the selected strategy.
+function applyStrategyPanels() {
+  const pf = isPortfolioMode();
+  const dt = el("dt-panel"), pp = el("pf-panel");
+  if (dt) dt.classList.toggle("hidden", pf);
+  if (pp) pp.classList.toggle("hidden", !pf);
+}
+
+// Settings form: portfolio box vs. Donchian-only fields follow the selected strategy.
+function syncStrategyForm() {
+  const v = el("cfg-strategy-profile") ? el("cfg-strategy-profile").value : "";
+  const pf = v === "PORTFOLIO_TREND";
+  if (el("cfg-portfolio-box")) el("cfg-portfolio-box").classList.toggle("hidden", !pf);
+  const tfGroup = document.querySelector('[data-risk-field="cfg-donchian-tf"]');
+  if (tfGroup) tfGroup.classList.toggle("hidden", pf);     // portfolio strategies pick their own timeframes
+  const hrs = document.querySelector('[data-risk-field="cfg-donchian-hours"]');
+  const sma = document.querySelector('[data-risk-field="cfg-donchian-sma"]');
+  const donUsed = v === "DONCHIAN_TREND" || (pf && el("cfg-pf-donchian") && el("cfg-pf-donchian").value === "true");
+  [hrs, sma].forEach(g => { if (g) g.classList.toggle("hidden", !donUsed); });
+}
+
+async function refreshPortfolioPanel() {
+  if (!isPortfolioMode() || !el("pf-panel")) return;
+  let d = null;
+  try {
+    const res = await fetch(API_BASE + `/api/v1/strategy/portfolio/status?symbol=${encodeURIComponent(state.symbol || "XAUUSD")}`,
+      { headers: { "X-API-Key": API_KEY } });
+    if (res.ok) d = await res.json();
+  } catch (e) { /* backend offline: keep last values */ }
+  if (d) renderPortfolioPanel(d);
+}
+
+function renderPortfolioPanel(d) {
+  state.pfStatus = d;
+  const money = (v) => (v === null || v === undefined) ? "--" : `${v < 0 ? "-" : ""}$${fmt(Math.abs(v), 2)}`;
+  const cur = d.currency || "USD";
+  const strategies = d.strategies || [];
+  const don = strategies.find(c => c.key === "DONCHIAN");
+  state.dtStatus = (don && don.ok) ? don : state.dtStatus;       // chart draws the channel the bot really trades
+
+  if (el("pf-open-chip")) el("pf-open-chip").textContent = `${d.open_total || 0} / ${d.max_open_positions || 0} OPEN`;
+  if (el("pf-risk-chip")) el("pf-risk-chip").textContent = `risk ${fmt(d.risk_per_strategy_pct, 2)}% per trade`;
+  const newsEl = el("pf-news");
+  if (newsEl && d.news) {
+    const n = d.news;
+    if (!n.enabled) newsEl.innerHTML = `News filter: <strong>OFF</strong>`;
+    else if (n.blocked) newsEl.innerHTML = `News: <strong class="down">BLOCKED</strong> &rarr; ${escHtml(n.message)}`;
+    else if (n.next) {
+      const m = n.next.minutes_from_now;
+      const when = m >= 120 ? `in ${Math.round(m / 60)} h` : m >= 0 ? `in ${m} min` : `${-m} min ago`;
+      newsEl.innerHTML = `Next big USD news: <strong>${escHtml(n.next.name)}</strong> ${when}`;
+    } else newsEl.textContent = "News: none coming up";
+  }
+
+  const box = el("pf-cards");
+  if (!box) return;
+  box.innerHTML = strategies.map(c => {
+    const off = c.enabled === false;
+    let sigCls = "dt-signal dt-signal-none", sigTxt = "NO SIGNAL";
+    if (off) { sigCls = "dt-signal dt-signal-off"; sigTxt = "OFF"; }
+    else if (!c.ok) { sigCls = "dt-signal dt-signal-off"; sigTxt = "NO DATA"; }
+    else if (c.signal === "BUY") { sigCls = "dt-signal dt-signal-buy"; sigTxt = "BUY SIGNAL"; }
+    else if (c.signal === "SELL") { sigCls = "dt-signal dt-signal-sell"; sigTxt = "SELL SIGNAL"; }
+    else if (c.market_open === false) { sigCls = "dt-signal dt-signal-off"; sigTxt = "MARKET CLOSED"; }
+    const head = c.headline || "";
+    const headCls = /UP/.test(head) ? "up" : /DOWN/.test(head) ? "down" : "";
+    let body;
+    if (!c.ok) {
+      body = `<p class="dt-note">${escHtml(c.message || "Waiting for MT5 data...")}</p>`;
+    } else {
+      const p = c.plan || {};
+      body = `<div class="pf-headline ${headCls}">${escHtml(head)}</div>
+        <p class="dt-note">${escHtml(c.detail || "")}</p>
+        <p class="dt-note">${escHtml(c.signal_text || "")}</p>
+        <div class="dt-stats">
+          <div><span>ATR (14, ${escHtml(c.timeframe)})</span><strong>$${fmt(p.atr, 2)}</strong></div>
+          <div><span>Stop distance</span><strong>$${fmt(p.stop_distance, 2)}</strong></div>
+          <div><span>Next lot</span><strong>${fmt(p.next_lot, 2)}</strong><em>${p.lot_capped ? "capped by Max Lot" : "from risk %"}</em></div>
+          <div><span>Risk if stopped</span><strong>${money(p.next_risk_usd)} ${escHtml(cur)}</strong>${p.next_risk_pct !== null && p.next_risk_pct !== undefined ? `<em>${fmt(p.next_risk_pct, 2)}% of equity</em>` : ""}</div>
+        </div>`;
+    }
+    const pos = c.positions || [];
+    const posHtml = pos.length ? `<div class="dt-positions">` + pos.map(t => {
+      const buy = t.side === "BUY";
+      const pnlColor = (t.pnl_usd || 0) >= 0 ? "var(--accent-emerald)" : "var(--accent-red)";
+      const locked = t.locked_usd === null || t.locked_usd === undefined ? "no stop" : (t.locked_usd >= 0 ? `locks ${money(t.locked_usd)}` : `risk ${money(-t.locked_usd)}`);
+      const trail = t.next_trail === null || t.next_trail === undefined ? escHtml(t.exit_rule || "") : `next trail ${fmt(t.next_trail, 2)}`;
+      return `<div class="dt-pos">
+        <span class="side ${buy ? "buy" : "sell"}">${t.side}</span>
+        <span class="meta">#${escHtml(String(t.ticket))} · ${fmt(t.lots, 2)} lot @ ${fmt(t.entry, 2)}</span>
+        <span class="pnl" style="color:${pnlColor}">${money(t.pnl_usd)}</span>
+        <span class="sub">Stop ${fmt(t.sl, 2)} (${locked}) · ${trail}</span>
+      </div>`;
+    }).join("") + `</div>` : `<p class="dt-note">No open trade. Exit rule: ${escHtml(c.exit_rule || "")}.</p>`;
+    return `<div class="pf-card${off ? " pf-off" : ""}">
+      <div class="pf-card-head"><h4>${escHtml(c.label)} <small>${escHtml(c.timeframe)}</small></h4><span class="${sigCls}">${sigTxt}</span></div>
+      ${body}${posHtml}</div>`;
   }).join("");
 }
 

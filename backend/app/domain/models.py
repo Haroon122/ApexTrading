@@ -208,6 +208,7 @@ class TradeDecisionReport(BaseModel):
     potential_loss_usd: float = 0.0
     potential_profit_usd: float = 0.0
     timestamp: datetime
+    signal_candle_ts: Optional[datetime] = None  # open time of the closed candle that produced the signal
 
 
 class RiskCheckResult(BaseModel):
@@ -296,6 +297,26 @@ class RiskSettings(BaseModel):
     max_positions_per_direction: int = 1
     news_filter_enabled: bool = True  # skip new entries 30 min before/after high-impact USD news
     donchian_timeframe: str = "H1"  # DONCHIAN_TREND entry chart: "H1" or "M15" (one at a time)
+    # DONCHIAN_TREND tuning. Hard sanity bounds here; the backtested safe ranges are enforced on save
+    # (donchian_trend.validate_params). Hours: H1 100h = 100 candles, M15 100h = 400 candles.
+    # No ge/le here on purpose: a hand-edited out-of-range value must not make the whole settings
+    # file fail to load (that would silently reset every other setting). The engine ignores bad
+    # values (donchian_trend.effective_params) and the save endpoint refuses them.
+    donchian_channel_hours: int = 100
+    donchian_trend_sma: int = 200
+    # PORTFOLIO_TREND: Donchian H1 + Supertrend H4 + Pullback H4 run together (see portfolio_trend.py).
+    # Each enabled strategy risks `portfolio_risk_per_strategy_pct` of equity per trade (instead of
+    # max_risk_per_trade_pct) and has at most one open trade. Backtest: 0.5% each = about 1.5R total
+    # worst-case exposure when all three are open.
+    portfolio_donchian_enabled: bool = True
+    portfolio_supertrend_enabled: bool = True
+    portfolio_pullback_enabled: bool = True
+    # Timeframe of each portfolio strategy (chosen by the user). Allowed: Donchian H1/M15, Supertrend and
+    # Pullback H1/H4/M15 (portfolio_trend.SUPPORTED_TFS); anything else is refused on save and ignored by the engine.
+    portfolio_donchian_tf: str = "H1"
+    portfolio_supertrend_tf: str = "H4"
+    portfolio_pullback_tf: str = "H4"
+    portfolio_risk_per_strategy_pct: float = 0.5
     min_minutes_between_entries: float = 30.0
     blocked_hours: List[int] = Field(default_factory=lambda: [18, 19, 20, 21])
     min_risk_reward_ratio: float = 2.0

@@ -64,3 +64,52 @@ After setting MT5 "Max bars in chart" to Unlimited and restarting MT5, M15 histo
 - H1 and M15 are highly correlated (monthly R correlation 0.76, 52% of M15 trades overlap an H1 trade).
   So only ONE runs at a time; the user picks it in Risk Settings (`donchian_timeframe`).
 - Live parity, M15 module vs backtest (last 6,000 bars): 47/47 signals identical.
+
+## Round 4: channel length x daily-SMA grid (Nov 2026, H1 2016-2026)
+90 combinations: channel 30-200 hours x daily SMA 30-250 days; stop 3 ATR, trail 4 ATR; costs as above.
+Inputs: `xau_H1_full.csv` / `xau_D1_full.csv` (same export as round 2).
+
+- **Not a lucky spike:** 98% of the 90 cells have PF > 1 in both 2016-20 and 2021-26. Median PF 1.34, median max drawdown 33R.
+  The plateau is flat: neighbouring cells look alike, the best-looking cells are not isolated peaks.
+- **Weak corners** (refused when saving settings): SMA 30 for every channel (PF 1.07-1.32, 0.93-1.18 at 3x costs);
+  SMA 50/60 with channel under 85h (PF at 3x costs 0.99-1.09); channel 30h; channel under 70h with SMA over 120.
+- **Walk-forward (pick the best combo on past years, trade the next year, 2019-2026):** out-of-sample total
+  66.5R (by PF) / 53.4R (by MAR) vs 67.4R for fixed 100h/200d and 67.6R for the *median* combo.
+  => Optimising the two numbers adds no out-of-sample value. Choose from the plateau, do not chase the best cell.
+- **Is the entry timing real?** Random entries with the same count, same daily-trend filter and same stops give
+  PF median 1.10-1.13 (95th percentile 1.22-1.26); the actual strategy (PF 1.38-1.50) beat all 150 random runs for
+  each of four tested combos. Part of the profit comes from the trend filter + trailing exit, the breakout adds the rest.
+- **Look-ahead test:** 80 (bar, params) cases recomputed from past data only: 0 differences.
+- Bootstrap (resampling trades) 5th-percentile PF is above 1.0 for 72 of 90 cells (PF at 3x costs above 1.0 for 84 of 90); for 100h/200d it is 1.17, 40h/100d 1.13.
+- Not tested: M15 (history limited by MT5 max bars), other symbols, other stop/trail multiples together with these grids.
+
+## Round 5 (Nov 2026): other strategies and the merged portfolio
+Data: `xau_H1.csv`, `xau_H4.csv` (Jan 2016 -> Nov 2026) and `xau_M15.csv` (Aug 2022 -> Nov 2026, MT5 100,000-bar limit),
+exported with yearly `copy_rates_range` calls. Same engine and costs as before. Scripts: `london_bt.py`, `supertrend_bt.py`,
+`sweep_bt.py`, `pullback_bt.py`, `merge_bt.py` (results in `results_*.csv`).
+
+| Strategy (all variants tested) | Verdict |
+|---|---|
+| London breakout H1/H4/M15 (72 variants) | Loses: best PF 1.05 (one H4 variant, +28R in 10 years), H1/M15 never profitable |
+| Liquidity sweep H1/H4/M15 (72 variants) | Loses without a trend filter (PF 0.72-0.90); filtered versions have 6-70 trades/yr and an unstable result |
+| Supertrend + EMA H4 (ST 10/2, EMA200, stop 3 ATR, exit on flip) | PF 1.39, +55R, max DD 9R, holds at 3x costs (PF 1.30). H1 PF 1.01-1.20, M15 mixed |
+| Trend pullback to EMA20 in a daily trend (H4, stop 2 ATR, trail 3 ATR) | PF 1.45, +63R, DD 13R, 3x costs PF 1.34. H1 PF 1.19 (3x costs 1.04), M15 PF 1.28 but DD 59R |
+
+Merged (`merge_bt.py`, 1R = one trade's stop distance, equal weight):
+
+| 2016-2026 | Trades/yr | PF | Total | Max DD |
+|---|---|---|---|---|
+| Donchian H1 (the previous live strategy) | 35 | 1.37 | +67R | 27R |
+| + Supertrend H4 | 70 | 1.38 | +122R | 33R |
+| **+ Pullback H4 (live: PORTFOLIO_TREND)** | **96** | **1.40** | **+185R** | **41R** |
+| + Pullback H1 | 161 | 1.31 | +254R | 75R |
+
+Pullback H1 and M15 add return but raise drawdown disproportionately (monthly R correlation with Donchian H1 is 0.74), so
+they are not in the live portfolio. Up to 3 trades can be open at once.
+
+Caveats: 2021-22 lost in every H1/H4 strategy; most of the profit comes from 2019-20 and 2024-25. Results after 2023 are
+inflated by the gold rally - expect a lower PF going forward. Maximum drawdown is measured on closed-trade order, not tick
+equity.
+
+Live code: `app/services/portfolio_trend.py`. Parity check (live signal functions vs the backtest signals on the same bars,
+last 3,000 H4 candles): Supertrend 0 mismatches / 68 signals, Pullback 0 mismatches / 195 signals.
