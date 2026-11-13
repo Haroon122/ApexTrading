@@ -317,6 +317,9 @@ class RiskSettings(BaseModel):
     portfolio_supertrend_tf: str = "H4"
     portfolio_pullback_tf: str = "H4"
     portfolio_risk_per_strategy_pct: float = 0.5
+    # Phone notifications through ntfy (the topic is stored server-side, not here)
+    notifications_enabled: bool = True
+    notify_spread_alert_usd: float = 5.0     # warn when spread >= this ($) while a trade is open; 0 = off
     min_minutes_between_entries: float = 30.0
     blocked_hours: List[int] = Field(default_factory=lambda: [18, 19, 20, 21])
     min_risk_reward_ratio: float = 2.0

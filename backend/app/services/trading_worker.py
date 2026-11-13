@@ -183,7 +183,14 @@ class GoldTradingWorker:
 
                 # 1. Fetch live market ticker and multi-timeframe candles
                 ticker = mt5_adapter.get_ticker(self.symbol)
-                
+                try:
+                    from app.services.notifier import notifier
+                    from app.domain.models import TradeState
+                    n_open = sum(1 for t in trade_manager.active_trades.values() if t.state == TradeState.OPEN)
+                    notifier.check_spread(ticker, n_open, trade_manager.risk_settings)
+                except Exception as e:
+                    logger.warning(f"[WORKER] spread alert check failed: {e}")
+
                 m1_candles = mt5_adapter.fetch_candles(self.symbol, "M1", 100)
                 m5_candles = mt5_adapter.fetch_candles(self.symbol, "M5", 100)
                 m15_candles = mt5_adapter.fetch_candles(self.symbol, "M15", 100)

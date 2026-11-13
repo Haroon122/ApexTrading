@@ -58,3 +58,9 @@ backend/scratch_*.txt
 
 # Research price exports (re-create with the snippet in backend/research/README.md)
 backend/research/xau_*.csv
+
+# Phone-notification topic typed in the dashboard
+backend/data/notifier_credentials.json
+
+# Saved MT5 logins (contain passwords)
+backend/data/saved_accounts.json

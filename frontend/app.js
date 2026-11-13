@@ -602,6 +602,9 @@ function updateRiskSettingsUI(cfg, forceModalUpdate = true) {
     setVal("cfg-donchian-hours", cfg.donchian_channel_hours ?? 100);
     setVal("cfg-donchian-sma", cfg.donchian_trend_sma ?? 200);
     setVal("cfg-news-filter", String(cfg.news_filter_enabled !== false));
+    setVal("cfg-notify", String(cfg.notifications_enabled !== false));
+    setVal("cfg-notify-spread", cfg.notify_spread_alert_usd ?? 5);
+    refreshNotifyStatus();
     setVal("cfg-lot-mode", cfg.lot_sizing_mode ?? "DYNAMIC_RISK");
     setVal("cfg-max-risk", cfg.max_risk_per_trade_pct ?? 1.0);
     setVal("cfg-user-lot", cfg.user_configured_lot ?? 0.01);
@@ -1507,7 +1510,7 @@ function tvDrawSupportResistance(levels) {
     const alpha = lv.strength >= 3 ? 0.95 : lv.strength === 2 ? 0.7 : 0.45;
     return { price: lv.price, width: lv.strength >= 3 ? 2 : 1,
       style: lv.strength >= 2 ? LW.LineStyle.Solid : LW.LineStyle.Dashed,
-      color: res ? `rgba(255,77,109,${alpha})` : `rgba(0,229,160,${alpha})`,
+      color: res ? `rgba(56,139,253,${alpha})` : `rgba(255,152,0,${alpha})`,
       title: `${res ? "R" : "S"} ${lv.tf} x${lv.touches}` };
   });
   const sig = JSON.stringify(specs) + d;
@@ -2426,6 +2429,8 @@ function initControls() {
       max_spread_pips: getFloat("cfg-max-spread", 3.0),
       blocked_hours: blockedHours,
       news_filter_enabled: pick("cfg-news-filter") !== "false",
+      notifications_enabled: pick("cfg-notify") !== "false",
+      notify_spread_alert_usd: getFloat("cfg-notify-spread", prevCfg.notify_spread_alert_usd ?? 5),
       auto_trade_enabled: pick("cfg-auto-trade-enabled") === "true",
       enable_live_trading: pick("cfg-enable-live-trading") === "true"
     };
@@ -2901,6 +2906,8 @@ function renderBacktestEquityCurve(curve) {
       refreshSupportResistance();
     });
   }
+  if (el("btn-notify-make")) el("btn-notify-make").addEventListener("click", makeNotifyTopic);
+  if (el("btn-notify-test")) el("btn-notify-test").addEventListener("click", sendNotifyTest);
   if (el("toggle-donchian")) el("toggle-donchian").addEventListener("click", () => { state.indicators.showDonchian = state.indicators.showDonchian === false; el("toggle-donchian").classList.toggle("active", state.indicators.showDonchian !== false); renderFinancialChart(); });
   el("toggle-macd").addEventListener("click", () => { state.indicators.showMACD = !state.indicators.showMACD; el("toggle-macd").classList.toggle("active", state.indicators.showMACD); renderFinancialChart(); });
 
@@ -3552,6 +3559,52 @@ function portfolioTimeframes(rs) {
   if (rs.portfolio_pullback_enabled !== false) tfs.push(String(rs.portfolio_pullback_tf || "H4").toUpperCase());
   const order = { M15: 0, H1: 1, H4: 2 };
   return [...new Set(tfs)].sort((a, b) => order[a] - order[b]).join(" + ") || "--";
+}
+
+// ── Phone notifications (ntfy): set up from the dashboard, no files to edit ──
+async function refreshNotifyStatus() {
+  const box = el("notify-status");
+  if (!box) return;
+  const st = await apiFetch("/api/v1/notifications/status");
+  if (!st) { box.textContent = "Could not read notification status."; return; }
+  if (el("cfg-notify-topic")) el("cfg-notify-topic").placeholder = st.topic_hint ? `saved (${st.topic_hint}), type a new one to change` : "apex-xxxxxxxxxxxx";
+  box.textContent = st.configured ? "A topic is saved. Press 'Save & send test' to check your phone buzzes."
+                                  : "Not set up yet. Follow the 4 steps above.";
+}
+
+async function postNotify(path, body) {
+  // apiFetch hides the server's message on errors, so read the response directly here.
+  try {
+    const res = await fetch(API_BASE + path, { method: "POST", headers: { "Content-Type": "application/json", "X-API-Key": API_KEY }, body: JSON.stringify(body) });
+    let data = {};
+    try { data = await res.json(); } catch (e) { /* not json */ }
+    return { ok: res.ok, data };
+  } catch (e) {
+    return { ok: false, data: { detail: "Could not reach the bot backend." } };
+  }
+}
+
+function makeNotifyTopic() {
+  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  const bytes = new Uint8Array(14);
+  crypto.getRandomValues(bytes);
+  el("cfg-notify-topic").value = "apex-" + Array.from(bytes, b => chars[b % chars.length]).join("");
+  el("notify-status").textContent = "Topic made. Subscribe to it in the ntfy app, then press 'Save & send test'.";
+}
+
+async function sendNotifyTest() {
+  const box = el("notify-status");
+  const topic = (el("cfg-notify-topic").value || "").trim();
+  if (topic) {
+    box.textContent = "Saving...";
+    const saved = await postNotify("/api/v1/notifications/config", { topic });
+    if (!saved.ok) { box.textContent = saved.data.detail || "Could not save."; return; }
+  }
+  box.textContent = "Sending test message...";
+  const t = await postNotify("/api/v1/notifications/test", {});
+  box.textContent = t.ok && t.data.ok ? "Test message sent. Check your phone (the ntfy app)."
+                                      : `The test failed: ${t.data.last_error || t.data.detail || "no response"}`;
+  refreshNotifyStatus();
 }
 
 function isPortfolioMode() {
