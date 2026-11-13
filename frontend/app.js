@@ -3586,7 +3586,7 @@ async function postNotify(path, body) {
 
 function makeNotifyTopic() {
   const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-  const bytes = new Uint8Array(14);
+  const bytes = new Uint8Array(8);
   crypto.getRandomValues(bytes);
   el("cfg-notify-topic").value = "apex-" + Array.from(bytes, b => chars[b % chars.length]).join("");
   el("notify-status").textContent = "Topic made. Subscribe to it in the ntfy app, then press 'Save & send test'.";
