@@ -170,7 +170,20 @@ class MT5Adapter:
         except Exception:
             return None
 
+    def resolve_symbol(self, symbol: str) -> str:
+        """Brokers name gold differently (XAUUSD, XAUUSDm, GOLD...). The dashboard asks for "XAUUSD";
+        when this broker has no such symbol, use the gold symbol it does have. Any other name,
+        or a name the broker has, is returned unchanged."""
+        try:
+            if (self.session_manager.use_live_mt5 and MT5_AVAILABLE
+                    and (symbol or "").upper() in ("XAUUSD", "GOLD") and mt5.symbol_info(symbol) is None):
+                return self.discover_gold_symbol() or symbol
+        except Exception:
+            pass
+        return symbol
+
     def get_ticker(self, symbol: str) -> TickerData:
+        symbol = self.resolve_symbol(symbol)
         if self.session_manager.use_live_mt5 and MT5_AVAILABLE:
             try:
                 tick = mt5.symbol_info_tick(symbol)
@@ -212,6 +225,7 @@ class MT5Adapter:
         from_datetime: Optional[datetime] = None,
         to_datetime: Optional[datetime] = None
     ) -> List[Candle]:
+        symbol = self.resolve_symbol(symbol)
         if self.session_manager.use_live_mt5 and MT5_AVAILABLE:
             try:
                 tf_map = {
