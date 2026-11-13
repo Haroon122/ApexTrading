@@ -785,6 +785,8 @@ class TradeManager:
                 setup_name=report.setup_name
             )
             logger.info(f"[EXECUTE DECISION] Trade {trade.trade_id} placed successfully! (Setup: {report.setup_name}, Daily count: {self.daily_trade_count})")
+            from app.services.notifier import notifier
+            notifier.trade_opened(trade, report.setup_name, report.timeframe, self.risk_settings)
             return True, trade, msg
         else:
             logger.error(f"[EXECUTE DECISION] Order placement failed: {msg}")
@@ -1034,7 +1036,10 @@ class TradeManager:
                         close_timestamp=close_time
                     )
                     trade_learner.propose_new_thresholds()
-                    
+
+                    from app.services.notifier import notifier
+                    notifier.trade_closed(trade, exit_price, round(pnl_usd, 2), exit_reason, self.risk_settings)
+
                     trade.state = TradeState.CLOSED
                     self.active_trades.pop(trade_id, None)
 

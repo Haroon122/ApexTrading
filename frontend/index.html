@@ -14,7 +14,7 @@
         rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 
-    <link rel="stylesheet" href="styles.css?v=20261111a">
+    <link rel="stylesheet" href="styles.css?v=20261111f">
 </head>
 
 <body class="dark-theme">
@@ -418,7 +418,7 @@
                         title="Toggle Smart Money Order Blocks & Fair Value Gaps"><i
                             class="fa-solid fa-boxes-stacked"></i> Order Blocks</button>
                     <button class="btn-chart-tool active" id="toggle-sr"
-                        title="Automatic support (green) and resistance (red) levels. Click to cycle: Nearby 2+2 (closest 2 above and 2 below price) / All / Off. Label: timeframe and number of touches."><i
+                        title="Automatic support (orange) and resistance (blue) levels. Click to cycle: Nearby 2+2 (closest 2 above and 2 below price) / All / Off. Label: timeframe and number of touches."><i
                             class="fa-solid fa-ruler-horizontal"></i> S/R</button>
                     <button class="btn-chart-tool active" id="toggle-donchian"
                         title="Donchian channel (shown when the Donchian Trend strategy is active)"><i
@@ -1106,6 +1106,31 @@
                             <small class="text-muted">Live Forex Factory calendar (NFP, CPI, FOMC...). Open trades are not closed.</small>
                         </div>
                     </div>
+                    <div class="control-group" data-risk-field="cfg-notify" style="margin-top:10px;padding:10px;border:1px solid var(--border);border-radius:6px;">
+                        <label>Phone Notifications (ntfy)</label>
+                        <select id="cfg-notify" class="form-control"><option value="true">ON &mdash; message when a trade opens / closes</option><option value="false">OFF</option></select>
+                        <small class="text-muted" style="display:block;margin-top:6px;">
+                            <b>One-time setup (free, no account):</b> 1) Install the <b>ntfy</b> app on your phone (Play Store / App Store).
+                            2) Press <b>Make a secret topic</b> below. 3) In the ntfy app press <b>+</b> and subscribe to the same topic name.
+                            4) Press <b>Save &amp; send test</b>: your phone should buzz.
+                            Keep the topic name private: anyone who knows it can read your alerts.
+                        </small>
+                        <label style="margin-top:8px;">Topic name</label>
+                        <div style="display:flex;gap:6px;">
+                            <input type="text" id="cfg-notify-topic" class="form-control" autocomplete="off" placeholder="apex-xxxxxxxxxxxx">
+                            <button type="button" class="btn-chart-tool" id="btn-notify-make">Make a secret topic</button>
+                        </div>
+                        <button type="button" class="btn-chart-tool" id="btn-notify-test" style="margin-top:8px;">Save &amp; send test</button>
+                        <small class="text-muted" id="notify-status" style="display:block;margin-top:6px;">Checking setup...</small>
+                    </div>
+                    <div class="grid-2col margin-top-sm">
+                        <div class="control-group" data-risk-field="cfg-notify-spread">
+                            <label>Spread Warning ($)</label>
+                            <input type="number" step="0.5" min="0" max="100" id="cfg-notify-spread" class="form-control" value="5">
+                            <small class="text-muted">Message when the spread is at least this many dollars while a trade is open (the market reopen can spike it to $40+). 0 = off.</small>
+                        </div>
+                    </div>
+                    </div>
 <h4 style="margin:16px 0 4px;font-size:13px;color:var(--accent-cyan);text-transform:uppercase;letter-spacing:.05em;">5. Automation</h4>
                     <div class="grid-2col margin-top-sm">
                         <div class="control-group" data-risk-field="cfg-auto-trade-enabled">
@@ -1591,7 +1616,7 @@
     </div>
 
     <script src="vendor/lightweight-charts.standalone.production.js"></script>
-    <script src="app.js?v=20261111a"></script>
+    <script src="app.js?v=20261111f"></script>
 </body>
 
 </html>

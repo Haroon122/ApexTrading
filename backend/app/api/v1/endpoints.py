@@ -337,6 +337,31 @@ def donchian_status(symbol: str = Query(default=settings.DEFAULT_SYMBOL)) -> Dic
     return data
 
 
+@router.get("/notifications/status")
+def notifications_status() -> Dict[str, Any]:
+    """Whether phone notifications (ntfy) are set up. Only a hint of the topic is returned."""
+    from app.services.notifier import notifier
+    return notifier.status(trade_manager.risk_settings)
+
+
+@router.post("/notifications/config", dependencies=[Depends(verify_api_key)])
+def notifications_config(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """Save the ntfy topic typed in the dashboard (stored on the server)."""
+    from app.services.notifier import notifier
+    err = notifier.save_topic(str(body.get("topic") or ""))
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    return {"ok": True, **notifier.status(trade_manager.risk_settings)}
+
+
+@router.post("/notifications/test", dependencies=[Depends(verify_api_key)])
+def notifications_test() -> Dict[str, Any]:
+    """Send a real test message so the user can confirm the phone receives it."""
+    from app.services.notifier import notifier
+    ok = notifier.send_now("Notifications are working. You will get a message here when a trade opens or closes.")
+    return {"ok": ok, **notifier.status(trade_manager.risk_settings)}
+
+
 @router.get("/market/levels")
 def market_levels(symbol: str = Query(default=settings.DEFAULT_SYMBOL),
                   timeframe: str = Query(default="M15")) -> Dict[str, Any]:

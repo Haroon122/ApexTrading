@@ -16,6 +16,8 @@
   "portfolio_supertrend_tf": "H1",
   "portfolio_pullback_tf": "H1",
   "portfolio_risk_per_strategy_pct": 0.5,
+  "notifications_enabled": true,
+  "notify_spread_alert_usd": 5.0,
   "min_minutes_between_entries": 30.0,
   "blocked_hours": [],
   "min_risk_reward_ratio": 2.0,
